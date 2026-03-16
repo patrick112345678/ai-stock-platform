@@ -20,7 +20,30 @@ export async function registerUser(username: string,email: string,password: stri
 
   return res.json()
 }
+export type SearchItem = {
+  symbol: string
+  name: string
+  market: "stock" | "crypto"
+  exchange: string
+}
 
+export async function searchMarket(
+  q: string,
+  market?: "stock" | "crypto"
+): Promise<SearchItem[]> {
+  const params = new URLSearchParams()
+  params.set("q", q)
+  if (market) params.set("market", market)
+
+  const res = await fetch(`${API_BASE}/market/search?${params.toString()}`)
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`搜尋失敗: ${text}`)
+  }
+
+  return res.json()
+}
 export async function loginUser(username: string, password: string) {
   const formData = new URLSearchParams()
   formData.append("username", username)
@@ -130,6 +153,56 @@ export async function getChart(symbol: string) {
 
   if (!res.ok) {
     throw new Error(`chart API 錯誤: ${res.status}`)
+  }
+
+  return res.json()
+}
+export type AIAnalyzeResponse = {
+  symbol: string
+  name: string
+  market: string
+  interval: string
+  quick_summary: {
+    trend: string
+    valuation: string
+    risk: string
+    patterns: string[]
+    bullish: string[]
+    bearish: string[]
+    one_line: string
+  }
+  ai_report: string | null
+}
+
+export async function analyzeAI(
+  symbol: string,
+  market: "stock" | "crypto"
+): Promise<AIAnalyzeResponse> {
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("access_token")
+      : null
+
+  const apiMarket = market === "stock" ? "US" : "crypto"
+
+  const res = await fetch(`${API_BASE}/ai/analyze`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      symbol,
+      market: apiMarket,
+      interval: "1d",
+      lang: "zh",
+      quick_only: true,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`AI 分析失敗: ${text}`)
   }
 
   return res.json()

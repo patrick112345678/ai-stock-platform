@@ -10,6 +10,10 @@ import {
   getQuote,
   getWatchlist,
   clearToken,
+  searchMarket,
+  analyzeAI,
+  type SearchItem,
+  type AIAnalyzeResponse,
 } from "@/lib/api"
 
 type QuoteData = {
@@ -38,12 +42,12 @@ type WatchItem = {
 
 export default function Home() {
   const router = useRouter()
-
+  const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
   const [checkedAuth, setCheckedAuth] = useState(false)
   const [marketMode, setMarketMode] = useState<"stock" | "crypto">("stock")
   const [symbolInput, setSymbolInput] = useState("AAPL")
   const [showChart, setShowChart] = useState(false)
-
+  const [sidebarWidth, setSidebarWidth] = useState(260)
   const [watchlist, setWatchlist] = useState<WatchItem[]>([])
   const [selected, setSelected] = useState<WatchItem>({
     symbol: "AAPL",
@@ -55,7 +59,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
-  // 1. 先檢查有沒有登入
+  const [searchResults, setSearchResults] = useState<SearchItem[]>([])
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+
   useEffect(() => {
     const token =
       typeof window !== "undefined"
@@ -70,7 +77,6 @@ export default function Home() {
     setCheckedAuth(true)
   }, [router])
 
-  // 2. 載入 watchlist
   async function loadWatchlist() {
     try {
       const data = await getWatchlist()
@@ -105,18 +111,21 @@ export default function Home() {
     loadWatchlist()
   }, [checkedAuth])
 
-  // 3. 載入 quote / chart
   useEffect(() => {
     async function fetchData() {
       try {
         setLoading(true)
         setError("")
+        setAiData(null)
 
         const quoteJson = await getQuote(selected.symbol, selected.market)
         setQuote(quoteJson)
 
         const chartJson = await getChart(selected.symbol)
         setChartData(Array.isArray(chartJson.candles) ? chartJson.candles : [])
+
+        const aiJson = await analyzeAI(selected.symbol, selected.market)
+        setAiData(aiJson)
       } catch (err) {
         console.error(err)
         setError(err instanceof Error ? err.message : "發生錯誤")
@@ -131,9 +140,48 @@ export default function Home() {
     }
   }, [selected, checkedAuth])
 
+  useEffect(() => {
+    if (!checkedAuth) return
+
+    const keyword = symbolInput.trim()
+
+    if (!keyword) {
+      setSearchResults([])
+      setShowSearchDropdown(false)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setSearchLoading(true)
+        const items = await searchMarket(keyword, marketMode)
+        setSearchResults(items)
+        setShowSearchDropdown(true)
+      } catch (err) {
+        console.error("searchMarket error:", err)
+        setSearchResults([])
+        setShowSearchDropdown(false)
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 250)
+
+    return () => clearTimeout(timer)
+  }, [symbolInput, marketMode, checkedAuth])
+
   const filteredWatchlist = useMemo(() => {
     return watchlist.filter((w) => w.market === marketMode)
   }, [watchlist, marketMode])
+
+  function handleSelectSearchItem(item: SearchItem) {
+    setSymbolInput(item.symbol)
+    setShowSearchDropdown(false)
+    setSelected({
+      symbol: item.symbol,
+      market: item.market,
+    })
+    setMarketMode(item.market)
+  }
 
   async function handleAddWatchlist() {
     try {
@@ -144,6 +192,7 @@ export default function Home() {
       await loadWatchlist()
 
       setSelected({ symbol, market: marketMode })
+      setShowSearchDropdown(false)
     } catch (err) {
       console.error(err)
       alert(err instanceof Error ? err.message : "新增失敗")
@@ -179,8 +228,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-black text-white">
-      {/* 左側 */}
-      <div className="w-64 bg-zinc-900 p-4 border-r border-zinc-800">
+      <div className="bg-zinc-900 p-3 border-r border-zinc-800 shrink-0 relative"style={{ width: sidebarWidth }}>
         <h2 className="text-2xl font-bold mb-6">Watchlist</h2>
 
         <div className="mb-4 space-y-2">
@@ -207,12 +255,53 @@ export default function Home() {
             </button>
           </div>
 
-          <input
-            value={symbolInput}
-            onChange={(e) => setSymbolInput(e.target.value)}
-            placeholder={marketMode === "stock" ? "AAPL / TSLA" : "BTC / ETH"}
-            className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 outline-none"
-          />
+          <div className="relative">
+            <input
+              value={symbolInput}
+              onChange={(e) => setSymbolInput(e.target.value)}
+              onFocus={() => {
+                if (searchResults.length > 0) {
+                  setShowSearchDropdown(true)
+                }
+              }}
+              placeholder={
+                marketMode === "stock"
+                  ? "搜尋股票代號或名稱"
+                  : "搜尋幣種代號或名稱"
+              }
+              className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 outline-none"
+            />
+
+            {showSearchDropdown && (
+              <div className="absolute z-20 mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl max-h-64 overflow-y-auto">
+                {searchLoading ? (
+                  <div className="px-3 py-2 text-sm text-zinc-400">
+                    搜尋中...
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-zinc-400">
+                    找不到結果
+                  </div>
+                ) : (
+                  searchResults.map((item) => (
+                    <button
+                      key={`${item.market}-${item.symbol}`}
+                      type="button"
+                      onClick={() => handleSelectSearchItem(item)}
+                      className="w-full text-left px-3 py-2 hover:bg-zinc-800 border-b border-zinc-800 last:border-b-0"
+                    >
+                      <div className="font-semibold text-white">
+                        {item.symbol}
+                      </div>
+                      <div className="text-sm text-zinc-400 truncate">
+                        {item.name} · {item.exchange}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
 
           <button
             onClick={handleAddWatchlist}
@@ -222,7 +311,7 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="space-y-3">
+        <div className="mt-3 max-h-[calc(100vh-220px)] overflow-y-auto space-y-1 pr-1">
           {filteredWatchlist.map((item) => {
             const active =
               selected.symbol === item.symbol && selected.market === item.market
@@ -230,36 +319,66 @@ export default function Home() {
             return (
               <div
                 key={`${item.market}-${item.symbol}-${item.id ?? "x"}`}
-                className={`rounded-lg border p-3 ${
+                className={`group rounded-md border px-2 py-2 transition ${
                   active
-                    ? "bg-zinc-700 border-zinc-500"
-                    : "bg-zinc-800 border-zinc-700"
+                    ? "bg-zinc-700/80 border-zinc-500"
+                    : "bg-zinc-900 border-transparent hover:bg-zinc-800"
                 }`}
               >
-                <button
-                  onClick={() => {
-                    setSelected(item)
-                    setSymbolInput(item.symbol)
-                  }}
-                  className="w-full text-left"
-                >
-                  <div className="font-semibold">{item.symbol}</div>
-                  <div className="text-xs text-zinc-400">{item.market}</div>
-                </button>
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    onClick={() => {
+                      setSelected(item)
+                      setSymbolInput(item.symbol)
+                      setMarketMode(item.market)
+                      setShowSearchDropdown(false)
+                    }}
+                    className="flex-1 text-left min-w-0"
+                  >
+                    <div className="text-sm font-semibold leading-5 truncate">
+                      {item.symbol}
+                    </div>
+                    <div className="text-[11px] text-zinc-400 leading-4 uppercase">
+                      {item.market}
+                    </div>
+                  </button>
 
-                <button
-                  onClick={() => handleDeleteWatchlist(item)}
-                  className="mt-2 text-xs text-red-400 hover:text-red-300"
-                >
-                  移除
-                </button>
+                  <button
+                    onClick={() => handleDeleteWatchlist(item)}
+                    className="text-[11px] text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0"
+                    title="移除"
+                  >
+                    刪除
+                  </button>
+                </div>
               </div>
             )
           })}
         </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setMarketMode("stock")}
+            className={`flex-1 rounded-md px-3 py-2 text-sm border ${
+              marketMode === "stock"
+                ? "bg-zinc-700 border-zinc-500"
+                : "bg-zinc-800 border-zinc-700 text-zinc-300"
+            }`}
+          >
+            Stock
+          </button>
+          <button
+            onClick={() => setMarketMode("crypto")}
+            className={`flex-1 rounded-md px-3 py-2 text-sm border ${
+              marketMode === "crypto"
+                ? "bg-zinc-700 border-zinc-500"
+                : "bg-zinc-800 border-zinc-700 text-zinc-300"
+            }`}
+          >
+            Crypto
+          </button>
+        </div>
       </div>
 
-      {/* 中間 */}
       <div className="flex-1 p-6 overflow-auto">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
@@ -349,8 +468,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* 右側 */}
-      <div className="w-80 bg-zinc-900 p-4 border-l border-zinc-800">
+      <div className="w-80 bg-zinc-900 p-4 border-l border-zinc-800 overflow-auto">
         <h2 className="text-2xl font-bold mb-6">AI Analysis</h2>
 
         <div className="space-y-4">
@@ -367,20 +485,73 @@ export default function Home() {
           <div className="bg-zinc-800 rounded-xl p-4">
             <div className="text-zinc-400 text-sm mb-1">Trend</div>
             <div className="font-semibold">
-              {quote
-                ? quote.change_percent >= 0
-                  ? "Bullish bias"
-                  : "Bearish bias"
-                : "Loading..."}
+              {aiData?.quick_summary?.trend || "Loading..."}
             </div>
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">Momentum</div>
+            <div className="text-zinc-400 text-sm mb-1">Valuation</div>
             <div className="font-semibold">
-              {quote
-                ? `${Math.abs(quote.change_percent).toFixed(2)}% move`
-                : "Loading..."}
+              {aiData?.quick_summary?.valuation || "Loading..."}
+            </div>
+          </div>
+
+          <div className="bg-zinc-800 rounded-xl p-4">
+            <div className="text-zinc-400 text-sm mb-1">Risk</div>
+            <div className="font-semibold">
+              {aiData?.quick_summary?.risk || "Loading..."}
+            </div>
+          </div>
+
+          <div className="bg-zinc-800 rounded-xl p-4">
+            <div className="text-zinc-400 text-sm mb-2">One-line Summary</div>
+            <div className="text-sm leading-6">
+              {aiData?.quick_summary?.one_line || "Loading..."}
+            </div>
+          </div>
+
+          <div className="bg-zinc-800 rounded-xl p-4">
+            <div className="text-zinc-400 text-sm mb-2">Bullish</div>
+            <div className="space-y-2">
+              {aiData?.quick_summary?.bullish?.length ? (
+                aiData.quick_summary.bullish.map((item, idx) => (
+                  <div key={idx} className="text-sm leading-5 text-green-300">
+                    • {item}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-zinc-400">暫無明確偏多訊號</div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-zinc-800 rounded-xl p-4">
+            <div className="text-zinc-400 text-sm mb-2">Bearish / Risk</div>
+            <div className="space-y-2">
+              {aiData?.quick_summary?.bearish?.length ? (
+                aiData.quick_summary.bearish.map((item, idx) => (
+                  <div key={idx} className="text-sm leading-5 text-red-300">
+                    • {item}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-zinc-400">暫無明確風險訊號</div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-zinc-800 rounded-xl p-4">
+            <div className="text-zinc-400 text-sm mb-2">Patterns</div>
+            <div className="space-y-2">
+              {aiData?.quick_summary?.patterns?.length ? (
+                aiData.quick_summary.patterns.map((item, idx) => (
+                  <div key={idx} className="text-sm leading-5">
+                    • {item}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-zinc-400">暫無型態訊號</div>
+              )}
             </div>
           </div>
 
