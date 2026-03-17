@@ -55,6 +55,7 @@ export default function Home() {
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
   const [checkedAuth, setCheckedAuth] = useState(false)
   const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
+  const [scanPool, setScanPool] = useState<"TOP30" | "TOP100" | "TOP800" | "ALL">("TOP30")
   const [symbolInput, setSymbolInput] = useState("AAPL")
   const [showChart, setShowChart] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(260)
@@ -97,8 +98,8 @@ export default function Home() {
 
       const result =
         nextMode === "opportunities"
-          ? await getScannerOpportunities(marketPool, 20)
-          : await getScannerLeaderboard(marketPool, "change_percent", 20)
+          ? await getScannerOpportunities(marketPool, scanPool, 20)
+          : await getScannerLeaderboard(marketPool, scanPool, "change_percent", 20)
 
       setScannerResult(Array.isArray(result) ? result : [])
     } catch (err) {
@@ -153,7 +154,7 @@ export default function Home() {
   useEffect(() => {
     if (!checkedAuth) return
     runScanner(scannerMode)
-  }, [checkedAuth, marketPool])
+  }, [checkedAuth, marketPool, scanPool])
 
   useEffect(() => {
     async function fetchData() {
@@ -289,6 +290,23 @@ export default function Home() {
         <h2 className="text-2xl font-bold mb-6">Watchlist</h2>
 
         <div className="mb-4 space-y-2">      
+            <div className="flex items-center gap-2 mr-2">
+              <div className="mb-3">
+                <label className="block text-sm text-zinc-400 mb-2">掃描池</label>
+                <select
+                  value={scanPool}
+                  onChange={(e) =>
+                    setScanPool(e.target.value as "TOP30" | "TOP100" | "TOP800" | "ALL")
+                  }
+                  className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-white outline-none"
+                >
+                  <option value="TOP30">TOP30（最快）</option>
+                  <option value="TOP100">TOP100</option>
+                  <option value="TOP800">TOP800</option>
+                  <option value="ALL">ALL（最慢）</option>
+                </select>
+              </div>
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={() => setMarketPool("TW")}
@@ -339,9 +357,9 @@ export default function Home() {
                 setTimeout(() => setShowSearchDropdown(false), 150)
               }}
               placeholder={
-                marketPool === "stock"
-                  ? "搜尋股票代號或名稱"
-                  : "搜尋幣種代號或名稱"
+                marketPool === "CRYPTO"
+                  ? "搜尋幣種代號或名稱"
+                  : "搜尋股票代號或名稱"
               }
               className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 outline-none"
             />
@@ -361,6 +379,7 @@ export default function Home() {
                     <button
                       key={`${item.market}-${item.symbol}`}
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleSelectSearchItem(item)}
                       className="w-full text-left px-3 py-2 hover:bg-zinc-800 border-b border-zinc-800 last:border-b-0"
                     >
@@ -428,38 +447,6 @@ export default function Home() {
               </div>
             )
           })}
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setMarketPool("TW")}
-            className={`flex-1 rounded-md px-3 py-2 text-sm border ${
-              marketPool === "TW"
-                ? "bg-zinc-700 border-zinc-500"
-                : "bg-zinc-800 border-zinc-700 text-zinc-300"
-            }`}
-          >
-            TW
-          </button>
-          <button
-            onClick={() => setMarketPool("US")}
-            className={`flex-1 rounded-md px-3 py-2 text-sm border ${
-              marketPool === "US"
-                ? "bg-zinc-700 border-zinc-500"
-                : "bg-zinc-800 border-zinc-700 text-zinc-300"
-            }`}
-          >
-            US
-          </button>
-          <button
-            onClick={() => setMarketPool("CRYPTO")}
-            className={`flex-1 rounded-md px-3 py-2 text-sm border ${
-              marketPool === "CRYPTO"
-                ? "bg-zinc-700 border-zinc-500"
-                : "bg-zinc-800 border-zinc-700 text-zinc-300"
-            }`}
-          >
-            CRYPTO
-          </button>
         </div>
       </div>
 

@@ -150,13 +150,14 @@ export async function getQuote(symbol: string, market: MarketPool) {
   return res.json()
 }
 
-export async function getChart(symbol: string) {
+export async function getChart(symbol: string, market: MarketPool) {
   const res = await fetch(
-    `${API_BASE}/market/chart?symbol=${symbol}&interval=1d&period=3mo`
+    `${API_BASE}/market/chart?symbol=${symbol}&market=${market}&interval=1d&period=3mo`
   )
 
   if (!res.ok) {
-    throw new Error(`chart API 錯誤: ${res.status}`)
+    const text = await res.text()
+    throw new Error(`chart API 錯誤: ${text}`)
   }
 
   return res.json()
@@ -229,12 +230,16 @@ export async function scanMarket(filter: any) {
   if (!res.ok) throw new Error("Scanner failed")
   return res.json()
 }
+export type ScanPool = "TOP30" | "TOP100" | "TOP800" | "ALL"
+
 export async function getScannerOpportunities(
   market: MarketPool,
+  pool: ScanPool,
   limit = 20
 ) {
   const params = new URLSearchParams()
   params.set("market", market)
+  params.set("pool", pool)
   params.set("limit", String(limit))
 
   const res = await fetch(`${API_BASE}/scanner/opportunities?${params.toString()}`)
@@ -246,13 +251,16 @@ export async function getScannerOpportunities(
 
   return res.json()
 }
+
 export async function getScannerLeaderboard(
   market: MarketPool,
+  pool: ScanPool,
   sort: "change_percent" | "volume" = "change_percent",
   limit = 20
 ) {
   const params = new URLSearchParams()
   params.set("market", market)
+  params.set("pool", pool)
   params.set("sort", sort)
   params.set("limit", String(limit))
 
