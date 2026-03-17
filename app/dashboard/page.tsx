@@ -41,12 +41,11 @@ type ChartCandle = {
 type WatchItem = {
   id?: number | string
   symbol: string
-  market: "stock" | "crypto"
+  market: "TW" | "US" | "CRYPTO"
 }
 
 export default function Home() {
   const router = useRouter()
-  const [stockRegion, setStockRegion] = useState<"TW" | "US">("US")
   const [watchlistDaily, setWatchlistDaily] = useState<AIWatchlistDailyItem[]>([])
   const [loadingWatchlistDaily, setLoadingWatchlistDaily] = useState(false)
   const [scannerResult, setScannerResult] = useState<any[]>([])
@@ -55,7 +54,7 @@ export default function Home() {
   const [lang, setLang] = useState<"zh" | "en">("zh")
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
   const [checkedAuth, setCheckedAuth] = useState(false)
-  const [marketMode, setMarketMode] = useState<"stock" | "crypto">("stock")
+  const [marketPool, setmarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
   const [symbolInput, setSymbolInput] = useState("AAPL")
   const [showChart, setShowChart] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(260)
@@ -98,8 +97,8 @@ export default function Home() {
 
       const result =
         nextMode === "opportunities"
-          ? await getScannerOpportunities(marketMode, 20)
-          : await getScannerLeaderboard(marketMode, "change_percent", 20)
+          ? await getScannerOpportunities(marketPool, 20)
+          : await getScannerLeaderboard(marketPool, "change_percent", 20)
 
       setScannerResult(Array.isArray(result) ? result : [])
     } catch (err) {
@@ -129,7 +128,7 @@ export default function Home() {
 
       if (mapped.length > 0) {
         setSelected(mapped[0])
-        setMarketMode(mapped[0].market)
+        setmarketPool(mapped[0].market)
         setSymbolInput(mapped[0].symbol)
       }
     } catch (err) {
@@ -142,7 +141,7 @@ export default function Home() {
       setLoadingWatchlistDaily(true)
       setError("")
 
-      const result = await analyzeWatchlistDaily(marketMode, 20)
+      const result = await analyzeWatchlistDaily(marketPool, 20)
       setWatchlistDaily(Array.isArray(result.items) ? result.items : [])
     } catch (err) {
       console.error(err)
@@ -154,7 +153,7 @@ export default function Home() {
   useEffect(() => {
     if (!checkedAuth) return
     runScanner(scannerMode)
-  }, [checkedAuth, marketMode])
+  }, [checkedAuth, marketPool])
 
   useEffect(() => {
     async function fetchData() {
@@ -199,7 +198,11 @@ export default function Home() {
     const timer = setTimeout(async () => {
       try {
         setSearchLoading(true)
-        const items = await searchMarket(keyword, marketMode)
+
+        const searchMarketType =
+          marketPool === "CRYPTO" ? "crypto" : marketPool === "TW" ? "tw" : "us"
+
+        const items = await searchMarket(keyword, searchMarketType)
         setSearchResults(items)
         setShowSearchDropdown(true)
       } catch (err) {
@@ -212,11 +215,11 @@ export default function Home() {
     }, 250)
 
     return () => clearTimeout(timer)
-  }, [symbolInput, marketMode, checkedAuth])
+  }, [symbolInput, marketPool, checkedAuth])
 
   const filteredWatchlist = useMemo(() => {
-    return watchlist.filter((w) => w.market === marketMode)
-  }, [watchlist, marketMode])
+    return watchlist.filter((w) => w.market === marketPool)
+  }, [watchlist, marketPool])
 
   function handleSelectSearchItem(item: SearchItem) {
     setSymbolInput(item.symbol)
@@ -225,7 +228,7 @@ export default function Home() {
       symbol: item.symbol,
       market: item.market,
     })
-    setMarketMode(item.market)
+    setmarketPool(item.market)
   }
 
   async function handleAddWatchlist() {
@@ -233,10 +236,10 @@ export default function Home() {
       const symbol = symbolInput.trim().toUpperCase()
       if (!symbol) return
 
-      await addWatchlist(symbol, marketMode)
+      await addWatchlist(symbol, marketPool)
       await loadWatchlist()
 
-      setSelected({ symbol, market: marketMode })
+      setSelected({ symbol, market: marketPool })
       setShowSearchDropdown(false)
     } catch (err) {
       console.error(err)
@@ -277,27 +280,39 @@ export default function Home() {
         <h2 className="text-2xl font-bold mb-6">Watchlist</h2>
 
         <div className="mb-4 space-y-2">
-          {marketMode === "stock" && (
-              <div className="flex gap-2 mt-2">
+          {marketPool === "stock" && (
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setStockRegion("TW")}
+                  onClick={() => setmarketPool("TW")}
                   className={`flex-1 rounded-lg px-3 py-2 border ${
-                    stockRegion === "TW"
+                    marketPool === "TW"
                       ? "bg-zinc-700 border-zinc-500"
                       : "bg-zinc-800 border-zinc-700"
                   }`}
                 >
-                  台股池
+                  台股
                 </button>
+
                 <button
-                  onClick={() => setStockRegion("US")}
+                  onClick={() => setmarketPool("US")}
                   className={`flex-1 rounded-lg px-3 py-2 border ${
-                    stockRegion === "US"
+                    marketPool === "US"
                       ? "bg-zinc-700 border-zinc-500"
                       : "bg-zinc-800 border-zinc-700"
                   }`}
                 >
-                  美股池
+                  美股
+                </button>
+
+                <button
+                  onClick={() => setmarketPool("CRYPTO")}
+                  className={`flex-1 rounded-lg px-3 py-2 border ${
+                    marketPool === "CRYPTO"
+                      ? "bg-zinc-700 border-zinc-500"
+                      : "bg-zinc-800 border-zinc-700"
+                  }`}
+                >
+                  Crypto
                 </button>
               </div>
             )}
@@ -311,7 +326,7 @@ export default function Home() {
                 }
               }}
               placeholder={
-                marketMode === "stock"
+                marketPool === "stock"
                   ? "搜尋股票代號或名稱"
                   : "搜尋幣種代號或名稱"
               }
@@ -376,7 +391,7 @@ export default function Home() {
                     onClick={() => {
                       setSelected(item)
                       setSymbolInput(item.symbol)
-                      setMarketMode(item.market)
+                      setmarketPool(item.market)
                       setShowSearchDropdown(false)
                     }}
                     className="flex-1 text-left min-w-0"
@@ -403,24 +418,34 @@ export default function Home() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setMarketMode("stock")}
+            onClick={() => setmarketPool("TW")}
             className={`flex-1 rounded-md px-3 py-2 text-sm border ${
-              marketMode === "stock"
+              marketPool === "TW"
                 ? "bg-zinc-700 border-zinc-500"
                 : "bg-zinc-800 border-zinc-700 text-zinc-300"
             }`}
           >
-            Stock
+            TW
           </button>
           <button
-            onClick={() => setMarketMode("crypto")}
+            onClick={() => setmarketPool("US")}
             className={`flex-1 rounded-md px-3 py-2 text-sm border ${
-              marketMode === "crypto"
+              marketPool === "US"
                 ? "bg-zinc-700 border-zinc-500"
                 : "bg-zinc-800 border-zinc-700 text-zinc-300"
             }`}
           >
-            Crypto
+            US
+          </button>
+          <button
+            onClick={() => setmarketPool("CRYPTO")}
+            className={`flex-1 rounded-md px-3 py-2 text-sm border ${
+              marketPool === "CRYPTO"
+                ? "bg-zinc-700 border-zinc-500"
+                : "bg-zinc-800 border-zinc-700 text-zinc-300"
+            }`}
+          >
+            CRYPTO
           </button>
         </div>
       </div>

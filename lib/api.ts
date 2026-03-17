@@ -1,5 +1,13 @@
 const API_BASE = "http://127.0.0.1:8000"
+type MarketPool = "TW" | "US" | "CRYPTO"
 
+function toLegacyMarket(pool: MarketPool): "stock" | "crypto" {
+  return pool === "CRYPTO" ? "crypto" : "stock"
+}
+
+function toAiMarket(pool: MarketPool): "TW" | "US" | "CRYPTO" {
+  return pool
+}
 export async function registerUser(username: string,email: string,password: string) {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: "POST",
@@ -185,14 +193,12 @@ export type AIAnalyzeResponse = {
 
 export async function analyzeAI(
   symbol: string,
-  market: "stock" | "crypto"
+  market: MarketPool
 ): Promise<AIAnalyzeResponse> {
   const token =
     typeof window !== "undefined"
       ? localStorage.getItem("access_token")
       : null
-
-  const apiMarket = market === "stock" ? "US" : "crypto"
 
   const res = await fetch(`${API_BASE}/ai/analyze`, {
     method: "POST",
@@ -202,7 +208,7 @@ export async function analyzeAI(
     },
     body: JSON.stringify({
       symbol,
-      market: apiMarket,
+      market: toAiMarket(market),
       interval: "1d",
       lang: "zh",
       quick_only: true,
@@ -229,7 +235,7 @@ export async function scanMarket(filter: any) {
   return res.json()
 }
 export async function getScannerOpportunities(
-  market: "stock" | "crypto" = "stock",
+  market: MarketPool,
   limit = 20
 ) {
   const params = new URLSearchParams()
@@ -246,15 +252,13 @@ export async function getScannerOpportunities(
   return res.json()
 }
 
-
-
 export async function getScannerLeaderboard(
-  market: "stock" | "crypto" = "stock",
+  market: MarketPool,
   sort: "change_percent" | "volume" = "change_percent",
   limit = 20
 ) {
   const params = new URLSearchParams()
-  params.set("market", market)
+  params.set("market", toLegacyMarket(market))
   params.set("sort", sort)
   params.set("limit", String(limit))
 
@@ -270,7 +274,7 @@ export async function getScannerLeaderboard(
 export type AIWatchlistDailyItem = {
   watchlist_id: number
   symbol: string
-  market: "stock" | "crypto"
+  market: string
   name?: string | null
   interval: string
   quick_summary: {
@@ -294,7 +298,7 @@ export type AIWatchlistDailyItem = {
 }
 
 export async function analyzeWatchlistDaily(
-  market?: "stock" | "crypto",
+  market?: MarketPool,
   limit = 20
 ): Promise<{ items: AIWatchlistDailyItem[] }> {
   const token = getToken()
