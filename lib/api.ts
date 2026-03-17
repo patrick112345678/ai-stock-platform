@@ -1,13 +1,8 @@
 const API_BASE = "http://127.0.0.1:8000"
-type MarketPool = "TW" | "US" | "CRYPTO"
+export type MarketPool = "TW" | "US" | "CRYPTO"
 
-function toLegacyMarket(pool: MarketPool): "stock" | "crypto" {
-  return pool === "CRYPTO" ? "crypto" : "stock"
-}
 
-function toAiMarket(pool: MarketPool): "TW" | "US" | "CRYPTO" {
-  return pool
-}
+
 export async function registerUser(username: string,email: string,password: string) {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: "POST",
@@ -31,13 +26,12 @@ export async function registerUser(username: string,email: string,password: stri
 export type SearchItem = {
   symbol: string
   name: string
-  market: "stock" | "crypto"
+  market: MarketPool
   exchange: string
 }
-
 export async function searchMarket(
   q: string,
-  market?: "stock" | "crypto"
+  market?: MarketPool
 ): Promise<SearchItem[]> {
   const params = new URLSearchParams()
   params.set("q", q)
@@ -101,7 +95,7 @@ export async function getWatchlist() {
   return res.json()
 }
 
-export async function addWatchlist(symbol: string, market: "stock" | "crypto") {
+export async function addWatchlist(symbol: string, market: MarketPool) {
   const token = getToken()
 
   const res = await fetch(`${API_BASE}/watchlist`, {
@@ -142,13 +136,15 @@ export async function deleteWatchlist(id: number | string) {
   return true
 }
 
-export async function getQuote(symbol: string, market: "stock" | "crypto") {
+export async function getQuote(symbol: string, market: MarketPool) {
+  console.log("DEBUG getQuote market =", market)
   const res = await fetch(
     `${API_BASE}/market/quote?symbol=${symbol}&market=${market}`
   )
 
   if (!res.ok) {
-    throw new Error(`quote API 錯誤: ${res.status}`)
+    const text = await res.text()
+    throw new Error(`quote API 錯誤: ${text}`)
   }
 
   return res.json()
@@ -190,7 +186,6 @@ export type AIAnalyzeResponse = {
   }
   ai_report: AIReport | null
 }
-
 export async function analyzeAI(
   symbol: string,
   market: MarketPool
@@ -208,7 +203,7 @@ export async function analyzeAI(
     },
     body: JSON.stringify({
       symbol,
-      market: toAiMarket(market),
+      market,
       interval: "1d",
       lang: "zh",
       quick_only: true,
@@ -251,14 +246,13 @@ export async function getScannerOpportunities(
 
   return res.json()
 }
-
 export async function getScannerLeaderboard(
   market: MarketPool,
   sort: "change_percent" | "volume" = "change_percent",
   limit = 20
 ) {
   const params = new URLSearchParams()
-  params.set("market", toLegacyMarket(market))
+  params.set("market", market)
   params.set("sort", sort)
   params.set("limit", String(limit))
 
@@ -274,7 +268,7 @@ export async function getScannerLeaderboard(
 export type AIWatchlistDailyItem = {
   watchlist_id: number
   symbol: string
-  market: string
+  market: MarketPool
   name?: string | null
   interval: string
   quick_summary: {

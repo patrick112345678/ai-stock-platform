@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import TradingChart from "@/components/TradingChart"
 import {
@@ -54,14 +54,14 @@ export default function Home() {
   const [lang, setLang] = useState<"zh" | "en">("zh")
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
   const [checkedAuth, setCheckedAuth] = useState(false)
-  const [marketPool, setmarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
+  const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
   const [symbolInput, setSymbolInput] = useState("AAPL")
   const [showChart, setShowChart] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [watchlist, setWatchlist] = useState<WatchItem[]>([])
   const [selected, setSelected] = useState<WatchItem>({
     symbol: "AAPL",
-    market: "stock",
+    market: "US",
   })
 
   const [quote, setQuote] = useState<QuoteData | null>(null)
@@ -72,7 +72,7 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<SearchItem[]>([])
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
-
+  const searchRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const token =
       typeof window !== "undefined"
@@ -121,14 +121,14 @@ export default function Home() {
       const mapped: WatchItem[] = items.map((item: any) => ({
         id: item.id,
         symbol: String(item.symbol).toUpperCase(),
-        market: (item.market || "stock") as "stock" | "crypto",
+        market: (item.market || "US") as "TW" | "US" | "CRYPTO",
       }))
 
       setWatchlist(mapped)
 
       if (mapped.length > 0) {
         setSelected(mapped[0])
-        setmarketPool(mapped[0].market)
+        setMarketPool(mapped[0].market)
         setSymbolInput(mapped[0].symbol)
       }
     } catch (err) {
@@ -161,7 +161,6 @@ export default function Home() {
         setLoading(true)
         setError("")
         setAiData(null)
-
         const quoteJson = await getQuote(selected.symbol, selected.market)
         setQuote(quoteJson)
 
@@ -198,13 +197,12 @@ export default function Home() {
     const timer = setTimeout(async () => {
       try {
         setSearchLoading(true)
-
-        const searchMarketType =
-          marketPool === "CRYPTO" ? "crypto" : marketPool === "TW" ? "tw" : "us"
-
-        const items = await searchMarket(keyword, searchMarketType)
+        const items = await searchMarket(keyword, marketPool)
         setSearchResults(items)
         setShowSearchDropdown(true)
+
+
+        
       } catch (err) {
         console.error("searchMarket error:", err)
         setSearchResults([])
@@ -228,7 +226,7 @@ export default function Home() {
       symbol: item.symbol,
       market: item.market,
     })
-    setmarketPool(item.market)
+    setMarketPool(item.market)
   }
 
   async function handleAddWatchlist() {
@@ -279,44 +277,45 @@ export default function Home() {
       <div className="bg-zinc-900 p-3 border-r border-zinc-800 shrink-0 relative"style={{ width: sidebarWidth }}>
         <h2 className="text-2xl font-bold mb-6">Watchlist</h2>
 
-        <div className="mb-4 space-y-2">
-          {marketPool === "stock" && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setmarketPool("TW")}
-                  className={`flex-1 rounded-lg px-3 py-2 border ${
-                    marketPool === "TW"
-                      ? "bg-zinc-700 border-zinc-500"
-                      : "bg-zinc-800 border-zinc-700"
-                  }`}
-                >
-                  台股
-                </button>
+        <div className="mb-4 space-y-2">      
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMarketPool("TW")}
+                className={`flex-1 rounded-lg px-3 py-2 border ${
+                  marketPool === "TW"
+                    ? "bg-zinc-700 border-zinc-500"
+                    : "bg-zinc-800 border-zinc-700"
+                }`}
+              >
+                台股
+              </button>
 
-                <button
-                  onClick={() => setmarketPool("US")}
-                  className={`flex-1 rounded-lg px-3 py-2 border ${
-                    marketPool === "US"
-                      ? "bg-zinc-700 border-zinc-500"
-                      : "bg-zinc-800 border-zinc-700"
-                  }`}
-                >
-                  美股
-                </button>
+              <button
+                onClick={() => setMarketPool("US")}
+                className={`flex-1 rounded-lg px-3 py-2 border ${
+                  marketPool === "US"
+                    ? "bg-zinc-700 border-zinc-500"
+                    : "bg-zinc-800 border-zinc-700"
+                }`}
+              >
+                美股
+              </button>
 
-                <button
-                  onClick={() => setmarketPool("CRYPTO")}
-                  className={`flex-1 rounded-lg px-3 py-2 border ${
-                    marketPool === "CRYPTO"
-                      ? "bg-zinc-700 border-zinc-500"
-                      : "bg-zinc-800 border-zinc-700"
-                  }`}
-                >
-                  Crypto
-                </button>
-              </div>
-            )}
-          <div className="relative">
+              <button
+                onClick={() => setMarketPool("CRYPTO")}
+                className={`flex-1 rounded-lg px-3 py-2 border ${
+                  marketPool === "CRYPTO"
+                    ? "bg-zinc-700 border-zinc-500"
+                    : "bg-zinc-800 border-zinc-700"
+                }`}
+              >
+                Crypto
+              </button>
+            </div>
+          <div
+            className="relative"
+            ref={searchRef}
+          >
             <input
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value)}
@@ -324,6 +323,9 @@ export default function Home() {
                 if (searchResults.length > 0) {
                   setShowSearchDropdown(true)
                 }
+              }}
+              onBlur={() => {
+                setTimeout(() => setShowSearchDropdown(false), 150)
               }}
               placeholder={
                 marketPool === "stock"
@@ -334,7 +336,7 @@ export default function Home() {
             />
 
             {showSearchDropdown && (
-              <div className="absolute z-20 mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl max-h-64 overflow-y-auto">
+              <div className="absolute z-20 top-full mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl max-h-64 overflow-y-auto">
                 {searchLoading ? (
                   <div className="px-3 py-2 text-sm text-zinc-400">
                     搜尋中...
@@ -391,7 +393,7 @@ export default function Home() {
                     onClick={() => {
                       setSelected(item)
                       setSymbolInput(item.symbol)
-                      setmarketPool(item.market)
+                      setMarketPool(item.market)
                       setShowSearchDropdown(false)
                     }}
                     className="flex-1 text-left min-w-0"
@@ -418,7 +420,7 @@ export default function Home() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setmarketPool("TW")}
+            onClick={() => setMarketPool("TW")}
             className={`flex-1 rounded-md px-3 py-2 text-sm border ${
               marketPool === "TW"
                 ? "bg-zinc-700 border-zinc-500"
@@ -428,7 +430,7 @@ export default function Home() {
             TW
           </button>
           <button
-            onClick={() => setmarketPool("US")}
+            onClick={() => setMarketPool("US")}
             className={`flex-1 rounded-md px-3 py-2 text-sm border ${
               marketPool === "US"
                 ? "bg-zinc-700 border-zinc-500"
@@ -438,7 +440,7 @@ export default function Home() {
             US
           </button>
           <button
-            onClick={() => setmarketPool("CRYPTO")}
+            onClick={() => setMarketPool("CRYPTO")}
             className={`flex-1 rounded-md px-3 py-2 text-sm border ${
               marketPool === "CRYPTO"
                 ? "bg-zinc-700 border-zinc-500"
