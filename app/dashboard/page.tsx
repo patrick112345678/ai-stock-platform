@@ -14,8 +14,10 @@ import {
   analyzeAI,
   getScannerOpportunities,
   getScannerLeaderboard,
+  analyzeWatchlistDaily,
   type SearchItem,
   type AIAnalyzeResponse,
+  type AIWatchlistDailyItem,
 } from "@/lib/api"
 
 type QuoteData = {
@@ -44,6 +46,9 @@ type WatchItem = {
 
 export default function Home() {
   const router = useRouter()
+  const [stockRegion, setStockRegion] = useState<"TW" | "US">("US")
+  const [watchlistDaily, setWatchlistDaily] = useState<AIWatchlistDailyItem[]>([])
+  const [loadingWatchlistDaily, setLoadingWatchlistDaily] = useState(false)
   const [scannerResult, setScannerResult] = useState<any[]>([])
   const [scanning, setScanning] = useState(false)
   const [scannerMode, setScannerMode] = useState<"opportunities" | "leaderboard">("opportunities")
@@ -81,6 +86,7 @@ export default function Home() {
     }
 
     setCheckedAuth(true)
+    loadWatchlist()
   }, [router])
   async function runScanner(mode?: "opportunities" | "leaderboard") {
     const nextMode = mode ?? scannerMode
@@ -131,7 +137,20 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "載入 watchlist 失敗")
     }
   }
+  async function runWatchlistDaily() {
+    try {
+      setLoadingWatchlistDaily(true)
+      setError("")
 
+      const result = await analyzeWatchlistDaily(marketMode, 20)
+      setWatchlistDaily(Array.isArray(result.items) ? result.items : [])
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "自選股每日分析失敗")
+    } finally {
+      setLoadingWatchlistDaily(false)
+    }
+  }
   useEffect(() => {
     if (!checkedAuth) return
     runScanner(scannerMode)
@@ -258,29 +277,30 @@ export default function Home() {
         <h2 className="text-2xl font-bold mb-6">Watchlist</h2>
 
         <div className="mb-4 space-y-2">
-          <div className="flex gap-2">
-            <button
-              onClick={() => setMarketMode("stock")}
-              className={`flex-1 rounded-lg px-3 py-2 border ${
-                marketMode === "stock"
-                  ? "bg-zinc-700 border-zinc-500"
-                  : "bg-zinc-800 border-zinc-700"
-              }`}
-            >
-              Stock
-            </button>
-            <button
-              onClick={() => setMarketMode("crypto")}
-              className={`flex-1 rounded-lg px-3 py-2 border ${
-                marketMode === "crypto"
-                  ? "bg-zinc-700 border-zinc-500"
-                  : "bg-zinc-800 border-zinc-700"
-              }`}
-            >
-              Crypto
-            </button>
-          </div>
-
+          {marketMode === "stock" && (
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => setStockRegion("TW")}
+                  className={`flex-1 rounded-lg px-3 py-2 border ${
+                    stockRegion === "TW"
+                      ? "bg-zinc-700 border-zinc-500"
+                      : "bg-zinc-800 border-zinc-700"
+                  }`}
+                >
+                  台股池
+                </button>
+                <button
+                  onClick={() => setStockRegion("US")}
+                  className={`flex-1 rounded-lg px-3 py-2 border ${
+                    stockRegion === "US"
+                      ? "bg-zinc-700 border-zinc-500"
+                      : "bg-zinc-800 border-zinc-700"
+                  }`}
+                >
+                  美股池
+                </button>
+              </div>
+            )}
           <div className="relative">
             <input
               value={symbolInput}
@@ -490,6 +510,51 @@ export default function Home() {
                   <div className="text-xl font-bold">
                     {lang === "zh" ? "AI 市場掃描" : "AI Market Scanner"}
                   </div>
+                  <div className="mt-6 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
+                    <div className="px-5 py-4 border-b border-zinc-800">
+                      <div className="text-xl font-bold">自選股每日分析</div>
+                      <div className="text-sm text-zinc-400 mt-1">
+                        依照目前自選股清單批次產生 AI 分析
+                      </div>
+                    </div>
+
+                    <div className="p-4">
+                      {loadingWatchlistDaily ? (
+                        <div className="text-sm text-zinc-400">分析中...</div>
+                      ) : watchlistDaily.length === 0 ? (
+                        <div className="text-sm text-zinc-400">尚未執行自選股每日分析</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {watchlistDaily.map((item) => (
+                            <div
+                              key={`${item.watchlist_id}-${item.symbol}`}
+                              className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <div className="font-semibold text-white">{item.symbol}</div>
+                                  <div className="text-sm text-zinc-400">{item.name || "-"}</div>
+                                </div>
+                                <div className="text-xs uppercase text-zinc-500">{item.market}</div>
+                              </div>
+
+                              {item.error ? (
+                                <div className="mt-3 text-sm text-red-400">{item.error}</div>
+                              ) : (
+                                <div className="mt-3 space-y-1 text-sm text-zinc-300">
+                                  <div><span className="text-zinc-500">趨勢：</span>{item.ai_report?.trend || "-"}</div>
+                                  <div><span className="text-zinc-500">風險：</span>{item.ai_report?.risk || "-"}</div>
+                                  <div><span className="text-zinc-500">摘要：</span>{item.ai_report?.summary || item.quick_summary?.one_line || "-"}</div>
+                                  <div><span className="text-zinc-500">建議：</span>{item.ai_report?.action || "-"}</div>
+                                  <div><span className="text-zinc-500">信心：</span>{item.ai_report?.confidence ?? "-"}</div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <div className="text-sm text-zinc-400 mt-1">
                     {lang === "zh"
                       ? "快速查看今日機會與市場排行"
@@ -525,7 +590,12 @@ export default function Home() {
                   >
                     {lang === "zh" ? "排行榜" : "Leaderboard"}
                   </button>
-
+                  <button
+                    onClick={runWatchlistDaily}
+                    className="px-3 py-2 rounded-md text-sm bg-emerald-600 hover:bg-emerald-500 text-white"
+                  >
+                    {loadingWatchlistDaily ? "分析中..." : "自選股每日分析"}
+                  </button>
                   <button
                     onClick={() => runScanner()}
                     className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"

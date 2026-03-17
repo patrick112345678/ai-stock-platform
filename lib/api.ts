@@ -157,6 +157,15 @@ export async function getChart(symbol: string) {
 
   return res.json()
 }
+export type AIReport = {
+  trend?: string
+  valuation?: string
+  risk?: string
+  summary?: string
+  action?: string
+  confidence?: number
+}
+
 export type AIAnalyzeResponse = {
   symbol: string
   name: string
@@ -171,7 +180,7 @@ export type AIAnalyzeResponse = {
     bearish: string[]
     one_line: string
   }
-  ai_report: string | null
+  ai_report: AIReport | null
 }
 
 export async function analyzeAI(
@@ -254,6 +263,60 @@ export async function getScannerLeaderboard(
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`取得排行榜失敗: ${text}`)
+  }
+
+  return res.json()
+}
+export type AIWatchlistDailyItem = {
+  watchlist_id: number
+  symbol: string
+  market: "stock" | "crypto"
+  name?: string | null
+  interval: string
+  quick_summary: {
+    trend?: string
+    valuation?: string
+    risk?: string
+    patterns?: string[]
+    bullish?: string[]
+    bearish?: string[]
+    one_line?: string
+  }
+  ai_report?: {
+    trend?: string
+    valuation?: string
+    risk?: string
+    summary?: string
+    action?: string
+    confidence?: number
+  } | null
+  error?: string | null
+}
+
+export async function analyzeWatchlistDaily(
+  market?: "stock" | "crypto",
+  limit = 20
+): Promise<{ items: AIWatchlistDailyItem[] }> {
+  const token = getToken()
+
+  const res = await fetch(`${API_BASE}/ai/watchlist-daily`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      market: market ?? null,
+      interval: "1d",
+      lang: "zh",
+      quick_only: false,
+      limit,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`自選股每日分析失敗: ${text}`)
   }
 
   return res.json()
