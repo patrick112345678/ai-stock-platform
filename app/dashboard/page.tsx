@@ -157,24 +157,35 @@ export default function Home() {
 
   useEffect(() => {
     async function fetchData() {
+      setLoading(true)
+      setError("")
+      setAiData(null)
+
       try {
-        setLoading(true)
-        setError("")
-        setAiData(null)
         const quoteJson = await getQuote(selected.symbol, selected.market)
         setQuote(quoteJson)
+      } catch (err) {
+        console.error("getQuote error:", err)
+        setQuote(null)
+      }
 
-        const chartJson = await getChart(selected.symbol)
+      try {
+        const chartJson = await getChart(selected.symbol, selected.market)
         setChartData(Array.isArray(chartJson.candles) ? chartJson.candles : [])
+      } catch (err) {
+        console.error("getChart error:", err)
+        setChartData([])
+      }
 
+      try {
         const aiJson = await analyzeAI(selected.symbol, selected.market)
         setAiData(aiJson)
       } catch (err) {
-        console.error(err)
-        setError(err instanceof Error ? err.message : "發生錯誤")
-      } finally {
-        setLoading(false)
+        console.error("analyzeAI error:", err)
+        setAiData(null)
       }
+
+      setLoading(false)
     }
 
     if (!checkedAuth) return
