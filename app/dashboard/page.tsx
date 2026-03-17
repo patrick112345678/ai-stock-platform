@@ -12,6 +12,8 @@ import {
   clearToken,
   searchMarket,
   analyzeAI,
+  getScannerOpportunities,
+  getScannerLeaderboard,
   type SearchItem,
   type AIAnalyzeResponse,
 } from "@/lib/api"
@@ -42,6 +44,10 @@ type WatchItem = {
 
 export default function Home() {
   const router = useRouter()
+  const [scannerResult, setScannerResult] = useState<any[]>([])
+  const [scanning, setScanning] = useState(false)
+  const [scannerMode, setScannerMode] = useState<"opportunities" | "leaderboard">("opportunities")
+  const [lang, setLang] = useState<"zh" | "en">("zh")
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
   const [checkedAuth, setCheckedAuth] = useState(false)
   const [marketMode, setMarketMode] = useState<"stock" | "crypto">("stock")
@@ -76,7 +82,27 @@ export default function Home() {
 
     setCheckedAuth(true)
   }, [router])
+  async function runScanner(mode?: "opportunities" | "leaderboard") {
+    const nextMode = mode ?? scannerMode
 
+    try {
+      setScanning(true)
+      setScannerResult([])
+      setError("")
+
+      const result =
+        nextMode === "opportunities"
+          ? await getScannerOpportunities(marketMode, 20)
+          : await getScannerLeaderboard(marketMode, "change_percent", 20)
+
+      setScannerResult(Array.isArray(result) ? result : [])
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "掃描失敗")
+    } finally {
+      setScanning(false)
+    }
+  }
   async function loadWatchlist() {
     try {
       const data = await getWatchlist()
@@ -108,8 +134,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!checkedAuth) return
-    loadWatchlist()
-  }, [checkedAuth])
+    runScanner(scannerMode)
+  }, [checkedAuth, marketMode])
 
   useEffect(() => {
     async function fetchData() {
@@ -458,16 +484,127 @@ export default function Home() {
               </div>
             )}
 
-            <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 shadow-lg">
-              <div className="text-2xl font-bold mb-4">Scanner</div>
-              <div className="text-zinc-400">
-                下一步把你 Streamlit 的「今日機會 / 排行榜 / 選股器」搬過來
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
+              <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xl font-bold">
+                    {lang === "zh" ? "AI 市場掃描" : "AI Market Scanner"}
+                  </div>
+                  <div className="text-sm text-zinc-400 mt-1">
+                    {lang === "zh"
+                      ? "快速查看今日機會與市場排行"
+                      : "Quickly view opportunities and rankings"}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setScannerMode("opportunities")
+                      runScanner("opportunities")
+                    }}
+                    className={`px-3 py-2 rounded-md text-sm border ${
+                      scannerMode === "opportunities"
+                        ? "bg-zinc-700 border-zinc-500 text-white"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                    }`}
+                  >
+                    {lang === "zh" ? "今日機會" : "Opportunities"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setScannerMode("leaderboard")
+                      runScanner("leaderboard")
+                    }}
+                    className={`px-3 py-2 rounded-md text-sm border ${
+                      scannerMode === "leaderboard"
+                        ? "bg-zinc-700 border-zinc-500 text-white"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                    }`}
+                  >
+                    {lang === "zh" ? "排行榜" : "Leaderboard"}
+                  </button>
+
+                  <button
+                    onClick={() => runScanner()}
+                    className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
+                  >
+                    {scanning
+                      ? lang === "zh" ? "掃描中..." : "Scanning..."
+                      : lang === "zh" ? "重新整理" : "Refresh"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4">
+                {scanning ? (
+                  <div className="text-sm text-zinc-400">
+                    {lang === "zh" ? "資料掃描中..." : "Scanning market data..."}
+                  </div>
+                ) : scannerResult.length === 0 ? (
+                  <div className="text-sm text-zinc-400">
+                    {lang === "zh" ? "目前沒有資料" : "No data available"}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {scannerResult.map((item, idx) => (
+                      <div
+                        key={`${item.symbol}-${idx}`}
+                        className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70 transition"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-white">{item.symbol}</div>
+                            <div className="text-sm text-zinc-400 truncate">
+                              {item.name || "-"}
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="font-semibold text-white">
+                              {item.price ?? "-"}
+                            </div>
+                            <div
+                              className={`text-sm ${
+                                Number(item.change_percent) >= 0
+                                  ? "text-green-400"
+                                  : "text-red-400"
+                              }`}
+                            >
+                              {item.change_percent != null ? `${item.change_percent}%` : "-"}
+                            </div>
+                          </div>
+                        </div>
+
+                        {item.summary && (
+                          <div className="mt-2 text-sm text-zinc-300 leading-6">
+                            {item.summary}
+                          </div>
+                        )}
+
+                        {Array.isArray(item.signals) && item.signals.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {item.signals.map((sig: string, i: number) => (
+                              <span
+                                key={i}
+                                className="px-2 py-1 rounded-full text-xs bg-zinc-800 border border-zinc-700 text-zinc-200"
+                              >
+                                {sig}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </>
         )}
       </div>
-
+      
       <div className="w-80 bg-zinc-900 p-4 border-l border-zinc-800 overflow-auto">
         <h2 className="text-2xl font-bold mb-6">AI Analysis</h2>
 
@@ -566,6 +703,7 @@ export default function Home() {
           </button>
         </div>
       </div>
+      
     </div>
   )
 }

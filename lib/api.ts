@@ -207,3 +207,54 @@ export async function analyzeAI(
 
   return res.json()
 }
+export async function scanMarket(filter: any) {
+  const res = await fetch(`${API_BASE}/scanner/filter`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(filter),
+  })
+
+  if (!res.ok) throw new Error("Scanner failed")
+  return res.json()
+}
+export async function getScannerOpportunities(
+  market: "stock" | "crypto" = "stock",
+  limit = 20
+) {
+  const params = new URLSearchParams()
+  params.set("market", market)
+  params.set("limit", String(limit))
+
+  const res = await fetch(`${API_BASE}/scanner/opportunities?${params.toString()}`)
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`取得今日機會失敗: ${text}`)
+  }
+
+  return res.json()
+}
+
+
+
+export async function getScannerLeaderboard(
+  market: "stock" | "crypto" = "stock",
+  sort: "change_percent" | "volume" = "change_percent",
+  limit = 20
+) {
+  const params = new URLSearchParams()
+  params.set("market", market)
+  params.set("sort", sort)
+  params.set("limit", String(limit))
+
+  const res = await fetch(`${API_BASE}/scanner/leaderboard?${params.toString()}`)
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`取得排行榜失敗: ${text}`)
+  }
+
+  return res.json()
+}
