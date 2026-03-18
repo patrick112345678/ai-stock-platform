@@ -1,25 +1,24 @@
 "use client"
 
-import { useEffect, useMemo, useState, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react"
 import TradingChart from "@/components/TradingChart"
 import {
   addWatchlist,
+  analyzeAI,
+  clearToken,
   deleteWatchlist,
+  getAIOpportunities,
   getChart,
   getQuote,
-  getWatchlist,
-  clearToken,
-  searchMarket,
-  analyzeAI,
-  getScannerOpportunities,
   getScannerLeaderboard,
-  analyzeWatchlistDaily,
-  getAIOpportunities,
-  type SearchItem,
+  getScannerOpportunities,
+  getWatchlist,
+  searchMarket,
   type AIAnalyzeResponse,
-  type AIWatchlistDailyItem,
   type AIOpportunityItem,
+  type SearchItem,
 } from "@/lib/api"
 
 type QuoteData = {
@@ -48,21 +47,21 @@ type WatchItem = {
 
 export default function Home() {
   const router = useRouter()
-  const [watchlistDaily, setWatchlistDaily] = useState<AIWatchlistDailyItem[]>([])
+
   const [aiOpportunities, setAiOpportunities] = useState<AIOpportunityItem[]>([])
   const [aiOpportunitiesUpdatedAt, setAiOpportunitiesUpdatedAt] = useState<string | null>(null)
   const [loadingAiOpportunities, setLoadingAiOpportunities] = useState(false)
-  const [loadingWatchlistDaily, setLoadingWatchlistDaily] = useState(false)
+
   const [scannerResult, setScannerResult] = useState<any[]>([])
   const [scanning, setScanning] = useState(false)
   const [scannerMode, setScannerMode] = useState<"opportunities" | "leaderboard">("opportunities")
-  const [lang, setLang] = useState<"zh" | "en">("zh")
-  const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
+
   const [checkedAuth, setCheckedAuth] = useState(false)
   const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
   const [scanPool, setScanPool] = useState<"TOP30" | "TOP100" | "TOP800" | "ALL">("TOP30")
   const [symbolInput, setSymbolInput] = useState("AAPL")
   const [showChart, setShowChart] = useState(false)
+
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [watchlist, setWatchlist] = useState<WatchItem[]>([])
   const [selected, setSelected] = useState<WatchItem>({
@@ -79,11 +78,51 @@ export default function Home() {
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const searchRef = useRef<HTMLDivElement | null>(null)
+
+  const [techScoreMin, setTechScoreMin] = useState(60)
+  const [techListCollapsed, setTechListCollapsed] = useState(false)
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false)
+
+  const [aiMode, setAiMode] = useState<"daily" | "watchlist">("daily")
+
+  const [rightPanelWidth, setRightPanelWidth] = useState(320)
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false)
+  const [isDraggingRightPanel, setIsDraggingRightPanel] = useState(false)
+
+  const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (isDraggingRightPanel && !isRightPanelCollapsed) {
+        const nextWidth = Math.max(260, Math.min(520, window.innerWidth - e.clientX))
+        setRightPanelWidth(nextWidth)
+      }
+
+      if (isDraggingSidebar && !isSidebarCollapsed) {
+        const nextWidth = Math.max(220, Math.min(420, e.clientX))
+        setSidebarWidth(nextWidth)
+      }
+    }
+
+    function onMouseUp() {
+      setIsDraggingRightPanel(false)
+      setIsDraggingSidebar(false)
+    }
+
+    window.addEventListener("mousemove", onMouseMove)
+    window.addEventListener("mouseup", onMouseUp)
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove)
+      window.removeEventListener("mouseup", onMouseUp)
+    }
+  }, [isDraggingRightPanel, isRightPanelCollapsed, isDraggingSidebar, isSidebarCollapsed])
+
   useEffect(() => {
     const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("access_token")
-        : null
+      typeof window !== "undefined" ? localStorage.getItem("access_token") : null
 
     if (!token) {
       router.push("/login")
@@ -93,6 +132,7 @@ export default function Home() {
     setCheckedAuth(true)
     loadWatchlist()
   }, [router])
+
   async function runScanner(mode?: "opportunities" | "leaderboard") {
     const nextMode = mode ?? scannerMode
 
@@ -114,15 +154,15 @@ export default function Home() {
       setScanning(false)
     }
   }
+
   async function loadWatchlist() {
     try {
       const data = await getWatchlist()
-
       const items = Array.isArray(data)
         ? data
-        : Array.isArray(data.items)
-        ? data.items
-        : []
+        : Array.isArray((data as any).items)
+          ? (data as any).items
+          : []
 
       const mapped: WatchItem[] = items.map((item: any) => ({
         id: item.id,
@@ -142,38 +182,27 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "載入 watchlist 失敗")
     }
   }
-  async function runAiOpportunities() {
+
+  async function runAiOpportunities(limit = 8) {
     try {
       setLoadingAiOpportunities(true)
       setError("")
 
-      const result = await getAIOpportunities(marketPool, 8)
+      const result = await getAIOpportunities(marketPool, limit)
       setAiOpportunities(Array.isArray(result.items) ? result.items : [])
       setAiOpportunitiesUpdatedAt(result.updated_at || null)
     } catch (err) {
       console.error(err)
-      setError(err instanceof Error ? err.message : "AI 今日機會載入失敗")
+      setError(err instanceof Error ? err.message : "AI 分析載入失敗")
     } finally {
       setLoadingAiOpportunities(false)
     }
   }
-  async function runWatchlistDaily() {
-    try {
-      setLoadingWatchlistDaily(true)
-      setError("")
 
-      const result = await analyzeWatchlistDaily(marketPool, 20)
-      setWatchlistDaily(Array.isArray(result.items) ? result.items : [])
-    } catch (err) {
-      console.error(err)
-      setError(err instanceof Error ? err.message : "自選股每日分析失敗")
-    } finally {
-      setLoadingWatchlistDaily(false)
-    }
-  }
   useEffect(() => {
     if (!checkedAuth) return
     runScanner(scannerMode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkedAuth, marketPool, scanPool])
 
   useEffect(() => {
@@ -232,9 +261,6 @@ export default function Home() {
         const items = await searchMarket(keyword, marketPool)
         setSearchResults(items)
         setShowSearchDropdown(true)
-
-
-        
       } catch (err) {
         console.error("searchMarket error:", err)
         setSearchResults([])
@@ -250,6 +276,39 @@ export default function Home() {
   const filteredWatchlist = useMemo(() => {
     return watchlist.filter((w) => w.market === marketPool)
   }, [watchlist, marketPool])
+
+  const filteredScannerResult = useMemo(() => {
+    return [...scannerResult]
+      .map((item) => ({
+        ...item,
+        uiScore: Number(item.score ?? 0),
+      }))
+      .filter((item) => item.uiScore >= techScoreMin)
+      .sort((a, b) => {
+        if (b.uiScore !== a.uiScore) return b.uiScore - a.uiScore
+        return String(a.symbol ?? "").localeCompare(String(b.symbol ?? ""))
+      })
+  }, [scannerResult, techScoreMin])
+
+  const aiOpportunityItems = useMemo(() => {
+    return [...aiOpportunities].sort((a, b) => Number(b.score ?? 0) - Number(a.score ?? 0))
+  }, [aiOpportunities])
+
+  const watchlistSymbolSet = useMemo(() => {
+    return new Set(filteredWatchlist.map((item) => item.symbol.toUpperCase()))
+  }, [filteredWatchlist])
+
+  const watchlistScannerItems = useMemo(() => {
+    return filteredScannerResult.filter((item) =>
+      watchlistSymbolSet.has(String(item.symbol ?? "").toUpperCase())
+    )
+  }, [filteredScannerResult, watchlistSymbolSet])
+
+  const watchlistAiItems = useMemo(() => {
+    return aiOpportunityItems.filter((item) =>
+      watchlistSymbolSet.has(String(item.symbol ?? "").toUpperCase())
+    )
+  }, [aiOpportunityItems, watchlistSymbolSet])
 
   function handleSelectSearchItem(item: SearchItem) {
     setSymbolInput(item.symbol)
@@ -281,9 +340,7 @@ export default function Home() {
     try {
       if (item.id == null) {
         setWatchlist((prev) =>
-          prev.filter(
-            (w) => !(w.symbol === item.symbol && w.market === item.market)
-          )
+          prev.filter((w) => !(w.symbol === item.symbol && w.market === item.market))
         )
         return
       }
@@ -305,188 +362,188 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen bg-black text-white">
-      <div className="bg-zinc-900 p-3 border-r border-zinc-800 shrink-0 relative"style={{ width: sidebarWidth }}>
-        <h2 className="text-2xl font-bold mb-6">Watchlist</h2>
+    <div className="flex h-screen bg-black text-white overflow-hidden">
+      <div
+        className={`p-3 shrink-0 relative transition-all duration-200 z-20
+            ${isSidebarCollapsed
+            ? "bg-black border-r border-transparent"
+            : "bg-zinc-900 border-r border-zinc-800"
+            }`}
+        style={{ width: isSidebarCollapsed ? 64 : sidebarWidth }}
+      >
+        <div
+            className={`mb-4 flex items-center ${
+            isSidebarCollapsed ? "justify-center" : "justify-between"
+        }`}
+        >
+        {!isSidebarCollapsed && <h2 className="text-2xl font-bold">Watchlist</h2>}
 
-        <div className="mb-4 space-y-2">      
-            <div className="flex items-center gap-2 mr-2">
-              <div className="mb-3">
-                <label className="block text-sm text-zinc-400 mb-2">掃描池</label>
-                <select
-                  value={scanPool}
-                  onChange={(e) =>
-                    setScanPool(e.target.value as "TOP30" | "TOP100" | "TOP800" | "ALL")
-                  }
-                  className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-white outline-none"
+        <button
+            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+            title={isSidebarCollapsed ? "展開左側欄" : "收合左側欄"}
+        >
+            {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button>
+        </div>
+
+        {!isSidebarCollapsed && (
+          <>
+            <div className="mb-4 space-y-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setMarketPool("TW")}
+                  className={`flex-1 rounded-lg px-3 py-2 border ${
+                    marketPool === "TW" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700"
+                  }`}
                 >
-                  <option value="TOP30">TOP30（最快）</option>
-                  <option value="TOP100">TOP100</option>
-                  <option value="TOP800">TOP800</option>
-                  <option value="ALL">ALL（最慢）</option>
-                </select>
+                  台股
+                </button>
+
+                <button
+                  onClick={() => setMarketPool("US")}
+                  className={`flex-1 rounded-lg px-3 py-2 border ${
+                    marketPool === "US" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700"
+                  }`}
+                >
+                  美股
+                </button>
+
+                <button
+                  onClick={() => setMarketPool("CRYPTO")}
+                  className={`flex-1 rounded-lg px-3 py-2 border ${
+                    marketPool === "CRYPTO" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700"
+                  }`}
+                >
+                  Crypto
+                </button>
               </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setMarketPool("TW")}
-                className={`flex-1 rounded-lg px-3 py-2 border ${
-                  marketPool === "TW"
-                    ? "bg-zinc-700 border-zinc-500"
-                    : "bg-zinc-800 border-zinc-700"
-                }`}
-              >
-                台股
-              </button>
 
-              <button
-                onClick={() => setMarketPool("US")}
-                className={`flex-1 rounded-lg px-3 py-2 border ${
-                  marketPool === "US"
-                    ? "bg-zinc-700 border-zinc-500"
-                    : "bg-zinc-800 border-zinc-700"
-                }`}
-              >
-                美股
-              </button>
+              <div className="relative" ref={searchRef}>
+                <input
+                  value={symbolInput}
+                  onChange={(e) => setSymbolInput(e.target.value)}
+                  onFocus={() => {
+                    if (searchResults.length > 0) setShowSearchDropdown(true)
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowSearchDropdown(false), 150)
+                  }}
+                  placeholder={marketPool === "CRYPTO" ? "搜尋幣種代號或名稱" : "搜尋股票代號或名稱"}
+                  className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 outline-none"
+                />
 
-              <button
-                onClick={() => setMarketPool("CRYPTO")}
-                className={`flex-1 rounded-lg px-3 py-2 border ${
-                  marketPool === "CRYPTO"
-                    ? "bg-zinc-700 border-zinc-500"
-                    : "bg-zinc-800 border-zinc-700"
-                }`}
-              >
-                Crypto
-              </button>
-            </div>
-          <div
-            className="relative"
-            ref={searchRef}
-          >
-            <input
-              value={symbolInput}
-              onChange={(e) => setSymbolInput(e.target.value)}
-              onFocus={() => {
-                if (searchResults.length > 0) {
-                  setShowSearchDropdown(true)
-                }
-              }}
-              onBlur={() => {
-                setTimeout(() => setShowSearchDropdown(false), 150)
-              }}
-              placeholder={
-                marketPool === "CRYPTO"
-                  ? "搜尋幣種代號或名稱"
-                  : "搜尋股票代號或名稱"
-              }
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 outline-none"
-            />
-
-            {showSearchDropdown && (
-              <div className="absolute z-20 top-full mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl max-h-64 overflow-y-auto">
-                {searchLoading ? (
-                  <div className="px-3 py-2 text-sm text-zinc-400">
-                    搜尋中...
+                {showSearchDropdown && (
+                  <div className="absolute z-20 top-full mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl max-h-64 overflow-y-auto">
+                    {searchLoading ? (
+                      <div className="px-3 py-2 text-sm text-zinc-400">搜尋中...</div>
+                    ) : searchResults.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-zinc-400">找不到結果</div>
+                    ) : (
+                      searchResults.map((item) => (
+                        <button
+                          key={`${item.market}-${item.symbol}`}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleSelectSearchItem(item)}
+                          className="w-full text-left px-3 py-2 hover:bg-zinc-800 border-b border-zinc-800 last:border-b-0"
+                        >
+                          <div className="font-semibold text-white">{item.symbol}</div>
+                          <div className="text-sm text-zinc-400 truncate">
+                            {item.name} · {item.exchange}
+                          </div>
+                        </button>
+                      ))
+                    )}
                   </div>
-                ) : searchResults.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-zinc-400">
-                    找不到結果
-                  </div>
-                ) : (
-                  searchResults.map((item) => (
-                    <button
-                      key={`${item.market}-${item.symbol}`}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleSelectSearchItem(item)}
-                      className="w-full text-left px-3 py-2 hover:bg-zinc-800 border-b border-zinc-800 last:border-b-0"
-                    >
-                      <div className="font-semibold text-white">
-                        {item.symbol}
-                      </div>
-                      <div className="text-sm text-zinc-400 truncate">
-                        {item.name} · {item.exchange}
-                      </div>
-                    </button>
-                  ))
                 )}
               </div>
-            )}
-          </div>
 
-          <button
-            onClick={handleAddWatchlist}
-            className="w-full rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2"
-          >
-            加入自選
-          </button>
-        </div>
-
-        <div className="mt-3 max-h-[calc(100vh-220px)] overflow-y-auto space-y-1 pr-1">
-          {filteredWatchlist.map((item) => {
-            const active =
-              selected.symbol === item.symbol && selected.market === item.market
-
-            return (
-              <div
-                key={`${item.market}-${item.symbol}-${item.id ?? "x"}`}
-                className={`group rounded-md border px-2 py-2 transition ${
-                  active
-                    ? "bg-zinc-700/80 border-zinc-500"
-                    : "bg-zinc-900 border-transparent hover:bg-zinc-800"
-                }`}
+              <button
+                onClick={handleAddWatchlist}
+                className="w-full rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <button
-                    onClick={() => {
-                      setSelected(item)
-                      setSymbolInput(item.symbol)
-                      setMarketPool(item.market)
-                      setShowSearchDropdown(false)
-                    }}
-                    className="flex-1 text-left min-w-0"
-                  >
-                    <div className="text-sm font-semibold leading-5 truncate">
-                      {item.symbol}
-                    </div>
-                    <div className="text-[11px] text-zinc-400 leading-4 uppercase">
-                      {item.market}
-                    </div>
-                  </button>
+                加入自選
+              </button>
+            </div>
 
-                  <button
-                    onClick={() => handleDeleteWatchlist(item)}
-                    className="text-[11px] text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0"
-                    title="移除"
+            <div className="mt-3 max-h-[calc(100vh-220px)] overflow-y-auto space-y-1 pr-1">
+              {filteredWatchlist.map((item) => {
+                const active = selected.symbol === item.symbol && selected.market === item.market
+
+                return (
+                  <div
+                    key={`${item.market}-${item.symbol}-${item.id ?? "x"}`}
+                    className={`group rounded-md border px-2 py-2 transition ${
+                      active
+                        ? "bg-zinc-700/80 border-zinc-500"
+                        : "bg-zinc-900 border-transparent hover:bg-zinc-800"
+                    }`}
                   >
-                    刪除
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        onClick={() => {
+                          setSelected(item)
+                          setSymbolInput(item.symbol)
+                          setMarketPool(item.market)
+                          setShowSearchDropdown(false)
+                        }}
+                        className="flex-1 text-left min-w-0"
+                      >
+                        <div className="text-sm font-semibold leading-5 truncate">{item.symbol}</div>
+                        <div className="text-[11px] text-zinc-400 leading-4 uppercase">{item.market}</div>
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteWatchlist(item)}
+                        className="text-[11px] text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0"
+                        title="移除"
+                      >
+                        刪除
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+
+        {!isSidebarCollapsed && (
+          <div
+            onMouseDown={() => setIsDraggingSidebar(true)}
+            className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent"
+          />
+        )}
       </div>
 
-      <div className="flex-1 p-6 overflow-auto">
+      <div className="flex-1 min-w-0 p-6 overflow-auto">
         <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold">
-              {quote ? `${quote.symbol} ${quote.price}` : "Loading..."}
-            </h1>
-            <div className="mt-2 text-zinc-400">
-              {quote?.name || "Loading company name..."}
+            <div>
+                <h1 className="text-4xl font-bold">
+                {quote ? `${quote.symbol} ${quote.price}` : "Loading..."}
+                </h1>
+                <div className="mt-2 text-zinc-400">{quote?.name || "Loading company name..."}</div>
             </div>
-          </div>
 
-          <button
-            onClick={() => setShowChart((prev) => !prev)}
-            className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700"
-          >
-            {showChart ? "隱藏圖表" : "顯示圖表"}
-          </button>
+            <div className="flex items-center gap-3">
+                <button
+                onClick={() => setShowChart((prev) => !prev)}
+                className="h-12 px-5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
+                >
+                {showChart ? "隱藏圖表" : "顯示圖表"}
+                </button>
+
+                {isRightPanelCollapsed && (
+                <button
+                    onClick={() => setIsRightPanelCollapsed(false)}
+                    className="flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
+                    title="展開右側欄"
+                >
+                    <PanelRightOpen size={18} />
+                </button>
+                )}
+            </div>
         </div>
 
         {error ? (
@@ -507,11 +564,7 @@ export default function Home() {
 
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
                   <div className="text-zinc-400 text-sm">Change</div>
-                  <div
-                    className={`text-lg font-semibold ${
-                      quote.change >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
+                  <div className={`text-lg font-semibold ${quote.change >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {quote.change}
                   </div>
                 </div>
@@ -549,329 +602,364 @@ export default function Home() {
               </div>
             )}
 
-            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
-              <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xl font-bold">
-                    {lang === "zh" ? "市場掃描" : "Market Scanner"}
+            <div className="space-y-6">
+              <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
+                <div className="px-5 py-4 border-b border-zinc-800 flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="text-2xl font-bold">技術分析</div>
+                    <div className="text-sm text-zinc-400 mt-1">
+                      這裡是技術分析區，可切換每日機會與自選股分析，支援分數篩選、排序與清單收合。
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-2">此區塊為技術分析結果，非 AI 生成。</div>
                   </div>
-                  <div className="mt-6 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
-                    <div className="px-5 py-4 border-b border-zinc-800">
-                      <div className="text-xl font-bold">自選股每日分析</div>
-                      <div className="text-sm text-zinc-400 mt-1">
-                        僅這個區塊為真正的 AI 生成內容，依照目前自選股清單批次產生分析
-                      </div>
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={() => {
+                        setScannerMode("opportunities")
+                        runScanner("opportunities")
+                      }}
+                      className={`px-3 py-2 rounded-md text-sm border ${
+                        scannerMode === "opportunities"
+                          ? "bg-zinc-700 border-zinc-500 text-white"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                      }`}
+                    >
+                      技術每日機會
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setScannerMode("leaderboard")
+                        runScanner("leaderboard")
+                      }}
+                      className={`px-3 py-2 rounded-md text-sm border ${
+                        scannerMode === "leaderboard"
+                          ? "bg-zinc-700 border-zinc-500 text-white"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                      }`}
+                    >
+                      自選股分析
+                    </button>
+
+                    <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                      <span className="text-sm text-zinc-400 whitespace-nowrap">最低分數</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={techScoreMin}
+                        onChange={(e) => setTechScoreMin(Number(e.target.value))}
+                        className="w-36 accent-emerald-500"
+                      />
+                      <span className="text-sm font-semibold text-white w-8 text-right">{techScoreMin}</span>
                     </div>
 
-                    <div className="p-4">
-                      {loadingWatchlistDaily ? (
-                        <div className="text-sm text-zinc-400">分析中...</div>
-                      ) : watchlistDaily.length === 0 ? (
-                        <div className="text-sm text-zinc-400">尚未執行自選股每日分析</div>
-                      ) : (
-                        <div className="space-y-3">
-                          {watchlistDaily.map((item) => (
-                            <div
-                              key={`${item.watchlist_id}-${item.symbol}`}
-                              className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3"
-                            >
-                              <div className="flex items-start justify-between gap-4">
-                                <div>
-                                  <div className="font-semibold text-white">{item.symbol}</div>
-                                  <div className="text-sm text-zinc-400">{item.name || "-"}</div>
-                                </div>
-                                <div className="text-xs uppercase text-zinc-500">{item.market}</div>
-                              </div>
-
-                              {item.error ? (
-                                <div className="mt-3 text-sm text-red-400">{item.error}</div>
-                              ) : (
-                                <div className="mt-3 space-y-1 text-sm text-zinc-300">
-                                  <div><span className="text-zinc-500">趨勢：</span>{item.ai_report?.trend || "-"}</div>
-                                  <div><span className="text-zinc-500">風險：</span>{item.ai_report?.risk || "-"}</div>
-                                  <div><span className="text-zinc-500">摘要：</span>{item.ai_report?.summary || item.quick_summary?.one_line || "-"}</div>
-                                  <div><span className="text-zinc-500">建議：</span>{item.ai_report?.action || "-"}</div>
-                                  <div><span className="text-zinc-500">信心：</span>{item.ai_report?.confidence ?? "-"}</div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-sm text-zinc-400 mt-1">
-                    {lang === "zh"
-                      ? "下方為技術掃描結果；AI 內容僅在 Premium 區塊顯示"
-                      : "Quickly view opportunities and rankings"}
+                    <button
+                      onClick={() => setTechListCollapsed((prev) => !prev)}
+                      className="px-3 py-2 rounded-md text-sm bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
+                    >
+                      {techListCollapsed ? "展開清單" : "縮起清單"}
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setScannerMode("opportunities")
-                      runScanner("opportunities")
-                    }}
-                    className={`px-3 py-2 rounded-md text-sm border ${
-                      scannerMode === "opportunities"
-                        ? "bg-zinc-700 border-zinc-500 text-white"
-                        : "bg-zinc-800 border-zinc-700 text-zinc-300"
-                    }`}
-                  >
-                    {lang === "zh" ? "技術今日機會" : "Technical Opportunities"}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setScannerMode("leaderboard")
-                      runScanner("leaderboard")
-                    }}
-                    className={`px-3 py-2 rounded-md text-sm border ${
-                      scannerMode === "leaderboard"
-                        ? "bg-zinc-700 border-zinc-500 text-white"
-                        : "bg-zinc-800 border-zinc-700 text-zinc-300"
-                    }`}
-                  >
-                    {lang === "zh" ? "技術排行榜" : "Technical Leaderboard"}
-                  </button>
-                  <button
-                    onClick={runAiOpportunities}
-                    className="px-3 py-2 rounded-md text-sm bg-violet-600 hover:bg-violet-500 text-white"
-                  >
-                    {loadingAiOpportunities ? "載入中..." : "AI 今日機會（Premium）"}
-                  </button>
-                  <button
-                    onClick={runWatchlistDaily}
-                    className="px-3 py-2 rounded-md text-sm bg-emerald-600 hover:bg-emerald-500 text-white"
-                  >
-                    {loadingWatchlistDaily ? "分析中..." : "自選股每日分析"}
-                  </button>
-                  <button
-                    onClick={() => runScanner()}
-                    className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
-                  >
-                    {scanning
-                      ? lang === "zh" ? "掃描中..." : "Scanning..."
-                      : lang === "zh" ? "重新整理" : "Refresh"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-4 border-b border-zinc-800">
-                <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-violet-900/60">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-lg font-bold text-violet-200">AI 今日機會（Premium）</div>
-                        <div className="mt-1 text-sm text-zinc-400">
-                          此區塊為真正的 AI 生成內容。後端會定時更新快取，使用者點擊時僅載入已生成結果，避免每次點擊都消耗大量 token。
-                        </div>
-                      </div>
-                      <div className="text-xs text-zinc-500 shrink-0">
-                        {aiOpportunitiesUpdatedAt ? `更新時間：${new Date(aiOpportunitiesUpdatedAt).toLocaleString("zh-TW")}` : "尚未載入"}
-                      </div>
-                    </div>
-                  </div>
+                {!techListCollapsed && (
                   <div className="p-4">
-                    {loadingAiOpportunities ? (
-                      <div className="text-sm text-zinc-400">AI 結果載入中...</div>
-                    ) : aiOpportunities.length === 0 ? (
-                      <div className="text-sm text-zinc-400">尚未載入 AI 今日機會，點上方按鈕後才會顯示。</div>
+                    <div className="mb-3 text-sm text-zinc-500">
+                      {scannerMode === "opportunities"
+                        ? `依分數由高到低排序，低於 ${techScoreMin} 分的技術每日機會不顯示。`
+                        : `這裡顯示自選股中的技術分析結果，並依分數排序。`}
+                    </div>
+
+                    {scanning ? (
+                      <div className="text-sm text-zinc-400">資料整理中...</div>
+                    ) : (scannerMode === "opportunities" ? filteredScannerResult : watchlistScannerItems).length === 0 ? (
+                      <div className="text-sm text-zinc-400">
+                        {scannerMode === "opportunities"
+                          ? "目前沒有符合分數門檻的技術每日機會"
+                          : "目前沒有符合分數門檻的自選股分析結果"}
+                      </div>
                     ) : (
                       <div className="space-y-3">
-                        {aiOpportunities.map((item, idx) => (
-                          <div key={`${item.symbol}-${idx}`} className="rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3">
+                        {(scannerMode === "opportunities" ? filteredScannerResult : watchlistScannerItems).map((item, idx) => (
+                          <button
+                            key={`${item.symbol}-${idx}`}
+                            onClick={() =>
+                              setSelected({
+                                symbol: item.symbol,
+                                market: marketPool,
+                              })
+                            }
+                            className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70 transition"
+                          >
                             <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <div className="font-semibold text-white">{idx + 1}. {item.symbol}</div>
-                                <div className="text-sm text-zinc-400">{item.name || "-"}</div>
+                              <div className="min-w-0">
+                                <div className="font-semibold text-white">
+                                  {idx + 1}. {item.symbol}
+                                </div>
+                                <div className="text-sm text-zinc-400 truncate">{item.name || "-"}</div>
                               </div>
-                              <div className="text-right">
-                                <div className="text-violet-200 font-semibold">AI 分數 {item.score ?? "-"}</div>
-                                <div className="text-sm text-zinc-400">{item.change_pct != null ? `${item.change_pct}%` : "-"}</div>
+
+                              <div className="text-right shrink-0">
+                                <div className="text-emerald-300 font-semibold">分數 {item.uiScore}</div>
+                                <div className="text-sm text-zinc-400">
+                                  {item.change_percent != null ? `${item.change_percent}%` : "-"}
+                                </div>
                               </div>
                             </div>
-                            <div className="mt-3 space-y-1 text-sm text-zinc-300">
-                              <div><span className="text-zinc-500">AI 理由：</span>{item.reason || "-"}</div>
-                              <div><span className="text-zinc-500">主要風險：</span>{item.risk || "-"}</div>
-                            </div>
-                          </div>
+
+                            {item.summary && (
+                              <div className="mt-2 text-sm text-zinc-300 leading-6">{item.summary}</div>
+                            )}
+
+                            {Array.isArray(item.signals) && item.signals.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {item.signals.map((sig: string, i: number) => (
+                                  <span
+                                    key={i}
+                                    className="px-2 py-1 rounded-full text-xs bg-zinc-800 border border-zinc-700 text-zinc-200"
+                                  >
+                                    {sig}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </button>
                         ))}
                       </div>
                     )}
                   </div>
-                </div>
+                )}
               </div>
 
-              <div className="p-4">
-                <div className="mb-3 text-sm text-zinc-500">下方為你自己的技術掃描結果，非 AI 生成。</div>
-                {scanning ? (
-                  <div className="text-sm text-zinc-400">
-                    {lang === "zh" ? "資料掃描中..." : "Scanning market data..."}
+              <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 overflow-hidden">
+                <div className="px-5 py-4 border-b border-violet-900/60 flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="text-2xl font-bold text-violet-200">AI 分析（Premium）</div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      這裡是 AI 分析區，可切換 AI 每日機會與 AI 自選股分析。
+                    </div>
                   </div>
-                ) : scannerResult.length === 0 ? (
-                  <div className="text-sm text-zinc-400">
-                    {lang === "zh" ? "目前沒有資料" : "No data available"}
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => runAiOpportunities(aiMode === "daily" ? 8 : 30)}
+                      className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
+                    >
+                      {loadingAiOpportunities ? "整理中..." : "重新整理"}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setAiMode("daily")
+                        runAiOpportunities(8)
+                      }}
+                      className={`px-3 py-2 rounded-md text-sm border ${
+                        aiMode === "daily"
+                          ? "bg-violet-600 border-violet-500 text-white"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                      }`}
+                    >
+                      AI 每日機會
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setAiMode("watchlist")
+                        runAiOpportunities(30)
+                      }}
+                      className={`px-3 py-2 rounded-md text-sm border ${
+                        aiMode === "watchlist"
+                          ? "bg-fuchsia-600 border-fuchsia-500 text-white"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                      }`}
+                    >
+                      AI 自選股分析
+                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {scannerResult.map((item, idx) => (
-                      <div
-                        key={`${item.symbol}-${idx}`}
-                        className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70 transition"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <div className="font-semibold text-white">{item.symbol}</div>
-                            <div className="text-sm text-zinc-400 truncate">
-                              {item.name || "-"}
+                </div>
+
+                <div className="px-5 py-3 border-b border-violet-900/60 text-xs text-zinc-500">
+                  {aiOpportunitiesUpdatedAt
+                    ? `更新時間：${new Date(aiOpportunitiesUpdatedAt).toLocaleString("zh-TW")}`
+                    : "尚未載入 AI 今日機會"}
+                </div>
+
+                <div className="p-4">
+                  {loadingAiOpportunities ? (
+                    <div className="text-sm text-zinc-400">AI 結果載入中...</div>
+                  ) : (aiMode === "daily" ? aiOpportunityItems : watchlistAiItems).length === 0 ? (
+                    <div className="text-sm text-zinc-400">
+                      {aiMode === "daily"
+                        ? "尚未載入 AI 每日機會，按上方按鈕後才會顯示。"
+                        : "目前沒有符合條件的 AI 自選股分析結果。"}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(aiMode === "daily" ? aiOpportunityItems : watchlistAiItems).map((item, idx) => (
+                        <button
+                          key={`${item.symbol}-${idx}`}
+                          onClick={() =>
+                            setSelected({
+                              symbol: item.symbol,
+                              market: marketPool,
+                            })
+                          }
+                          className="w-full text-left rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70 transition"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <div className="font-semibold text-white">
+                                {idx + 1}. {item.symbol}
+                              </div>
+                              <div className="text-sm text-zinc-400">{item.name || "-"}</div>
+                            </div>
+
+                            <div className="text-right">
+                              <div className="text-violet-200 font-semibold">AI 分數 {item.score ?? "-"}</div>
+                              <div className="text-sm text-zinc-400">
+                                {item.change_pct != null ? `${item.change_pct}%` : "-"}
+                              </div>
                             </div>
                           </div>
 
-                          <div className="text-right shrink-0">
-                            <div className="font-semibold text-white">
-                              {item.price ?? "-"}
+                          <div className="mt-3 space-y-1 text-sm text-zinc-300">
+                            <div>
+                              <span className="text-zinc-500">AI 理由：</span>
+                              {item.reason || "-"}
                             </div>
-                            <div
-                              className={`text-sm ${
-                                Number(item.change_percent) >= 0
-                                  ? "text-green-400"
-                                  : "text-red-400"
-                              }`}
-                            >
-                              {item.change_percent != null ? `${item.change_percent}%` : "-"}
+                            <div>
+                              <span className="text-zinc-500">主要風險：</span>
+                              {item.risk || "-"}
                             </div>
                           </div>
-                        </div>
-
-                        {item.summary && (
-                          <div className="mt-2 text-sm text-zinc-300 leading-6">
-                            {item.summary}
-                          </div>
-                        )}
-
-                        {Array.isArray(item.signals) && item.signals.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {item.signals.map((sig: string, i: number) => (
-                              <span
-                                key={i}
-                                className="px-2 py-1 rounded-full text-xs bg-zinc-800 border border-zinc-700 text-zinc-200"
-                              >
-                                {sig}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </>
         )}
       </div>
-      
-      <div className="w-80 bg-zinc-900 p-4 border-l border-zinc-800 overflow-auto">
-        <h2 className="text-2xl font-bold mb-6">技術面摘要</h2>
 
-        <div className="space-y-4">
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">Symbol</div>
-            <div className="font-semibold">{selected.symbol}</div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">Market</div>
-            <div className="font-semibold">{selected.market}</div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
-            <div className="font-semibold">
-              {aiData?.quick_summary?.trend || "Loading..."}
-            </div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
-            <div className="font-semibold">
-              {aiData?.quick_summary?.valuation || "Loading..."}
-            </div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">技術風險</div>
-            <div className="font-semibold">
-              {aiData?.quick_summary?.risk || "Loading..."}
-            </div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
-            <div className="text-sm leading-6">
-              {aiData?.quick_summary?.one_line || "Loading..."}
-            </div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">偏多訊號</div>
-            <div className="space-y-2">
-              {aiData?.quick_summary?.bullish?.length ? (
-                aiData.quick_summary.bullish.map((item, idx) => (
-                  <div key={idx} className="text-sm leading-5 text-green-300">
-                    • {item}
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-zinc-400">暫無明確偏多訊號</div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">偏空 / 風險訊號</div>
-            <div className="space-y-2">
-              {aiData?.quick_summary?.bearish?.length ? (
-                aiData.quick_summary.bearish.map((item, idx) => (
-                  <div key={idx} className="text-sm leading-5 text-red-300">
-                    • {item}
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-zinc-400">暫無明確風險訊號</div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">技術型態</div>
-            <div className="space-y-2">
-              {aiData?.quick_summary?.patterns?.length ? (
-                aiData.quick_summary.patterns.map((item, idx) => (
-                  <div key={idx} className="text-sm leading-5">
-                    • {item}
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-zinc-400">暫無型態訊號</div>
-              )}
-            </div>
-          </div>
-
-          <button
-            onClick={() => {
-              clearToken()
-              router.push("/login")
-            }}
-            className="w-full rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2"
+      <div className="relative shrink-0">
+        {!isRightPanelCollapsed && (
+          <div
+            className="bg-zinc-900 p-4 border-l border-zinc-800 overflow-auto relative transition-all duration-200 h-full"
+            style={{ width: rightPanelWidth }}
           >
-            登出
-          </button>
-        </div>
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <h2 className="text-2xl font-bold">技術面摘要</h2>
+
+              <button
+                onClick={() => setIsRightPanelCollapsed(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                title="收合右側欄"
+              >
+                <PanelRightClose size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-1">Symbol</div>
+                <div className="font-semibold">{selected.symbol}</div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-1">Market</div>
+                <div className="font-semibold">{selected.market}</div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
+                <div className="font-semibold">{aiData?.quick_summary?.trend || "Loading..."}</div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
+                <div className="font-semibold">{aiData?.quick_summary?.valuation || "Loading..."}</div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-1">技術風險</div>
+                <div className="font-semibold">{aiData?.quick_summary?.risk || "Loading..."}</div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
+                <div className="text-sm leading-6">{aiData?.quick_summary?.one_line || "Loading..."}</div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-2">偏多訊號</div>
+                <div className="space-y-2">
+                  {aiData?.quick_summary?.bullish?.length ? (
+                    aiData.quick_summary.bullish.map((item, idx) => (
+                      <div key={idx} className="text-sm leading-5 text-green-300">
+                        • {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-zinc-400">暫無明確偏多訊號</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-2">偏空 / 風險訊號</div>
+                <div className="space-y-2">
+                  {aiData?.quick_summary?.bearish?.length ? (
+                    aiData.quick_summary.bearish.map((item, idx) => (
+                      <div key={idx} className="text-sm leading-5 text-red-300">
+                        • {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-zinc-400">暫無明確風險訊號</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-zinc-800 rounded-xl p-4">
+                <div className="text-zinc-400 text-sm mb-2">技術型態</div>
+                <div className="space-y-2">
+                  {aiData?.quick_summary?.patterns?.length ? (
+                    aiData.quick_summary.patterns.map((item, idx) => (
+                      <div key={idx} className="text-sm leading-5">
+                        • {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-zinc-400">暫無型態訊號</div>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  clearToken()
+                  router.push("/login")
+                }}
+                className="w-full rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2"
+              >
+                登出
+              </button>
+            </div>
+
+            <div
+              onMouseDown={() => setIsDraggingRightPanel(true)}
+              className="absolute top-0 left-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-zinc-600/70"
+            />
+          </div>
+        )}
+
+       
       </div>
-      
     </div>
   )
 }
