@@ -29,12 +29,12 @@ export type SearchItem = {
   market: MarketPool
   exchange: string
 }
-export async function searchMarket(
-  q: string,
-  market?: MarketPool
-): Promise<SearchItem[]> {
+export async function searchMarket(q: string, market?: MarketPool) {
+  const keyword = q.trim()
+  if (!keyword) return []
+
   const params = new URLSearchParams()
-  params.set("q", q)
+  params.set("q", keyword)
   if (market) params.set("market", market)
 
   const res = await fetch(`${API_BASE}/market/search?${params.toString()}`)

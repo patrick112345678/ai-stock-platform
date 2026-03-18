@@ -376,7 +376,7 @@ export default function Home() {
             isSidebarCollapsed ? "justify-center" : "justify-between"
         }`}
         >
-        {!isSidebarCollapsed && <h2 className="text-2xl font-bold">Watchlist</h2>}
+        {!isSidebarCollapsed && <h2 className="text-2xl font-bold"></h2>}
 
         <button
             onClick={() => setIsSidebarCollapsed((prev) => !prev)}
