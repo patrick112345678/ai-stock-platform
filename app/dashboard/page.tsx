@@ -2,11 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react"
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react"
 import TradingChart from "@/components/TradingChart"
 import {
   addWatchlist,
   analyzeAI,
+  analyzeWatchlistDaily,
   clearToken,
   deleteWatchlist,
   getAIOpportunities,
@@ -18,6 +24,7 @@ import {
   searchMarket,
   type AIAnalyzeResponse,
   type AIOpportunityItem,
+  type AIWatchlistDailyItem,
   type SearchItem,
 } from "@/lib/api"
 
@@ -92,6 +99,8 @@ export default function Home() {
   const [isDraggingRightPanel, setIsDraggingRightPanel] = useState(false)
 
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
+  const [watchlistAiDaily, setWatchlistAiDaily] = useState<AIWatchlistDailyItem[]>([])
+  const [loadingWatchlistAiDaily, setLoadingWatchlistAiDaily] = useState(false)
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
@@ -130,7 +139,7 @@ export default function Home() {
     }
 
     setCheckedAuth(true)
-    loadWatchlist()
+    void loadWatchlist()
   }, [router])
 
   async function runScanner(mode?: "opportunities" | "leaderboard") {
@@ -199,11 +208,38 @@ export default function Home() {
     }
   }
 
+  async function runWatchlistAiDaily(limit = 20) {
+    try {
+      setLoadingWatchlistAiDaily(true)
+      setError("")
+
+      const result = await analyzeWatchlistDaily(marketPool, limit)
+      setWatchlistAiDaily(Array.isArray(result.items) ? result.items : [])
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "自選股 AI 分析載入失敗")
+    } finally {
+      setLoadingWatchlistAiDaily(false)
+    }
+  }
+
   useEffect(() => {
     if (!checkedAuth) return
-    runScanner(scannerMode)
+    void runScanner(scannerMode)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkedAuth, marketPool, scanPool])
+
+  useEffect(() => {
+    if (!checkedAuth) return
+    void runAiOpportunities(8)
+  }, [checkedAuth, marketPool])
+
+  useEffect(() => {
+    if (!checkedAuth) return
+    if (aiMode === "watchlist") {
+      void runWatchlistAiDaily(30)
+    }
+  }, [aiMode, checkedAuth, marketPool])
 
   useEffect(() => {
     async function fetchData() {
@@ -240,7 +276,7 @@ export default function Home() {
 
     if (!checkedAuth) return
     if (selected.symbol) {
-      fetchData()
+      void fetchData()
     }
   }, [selected, checkedAuth])
 
@@ -304,12 +340,6 @@ export default function Home() {
     )
   }, [filteredScannerResult, watchlistSymbolSet])
 
-  const watchlistAiItems = useMemo(() => {
-    return aiOpportunityItems.filter((item) =>
-      watchlistSymbolSet.has(String(item.symbol ?? "").toUpperCase())
-    )
-  }, [aiOpportunityItems, watchlistSymbolSet])
-
   function handleSelectSearchItem(item: SearchItem) {
     setSymbolInput(item.symbol)
     setShowSearchDropdown(false)
@@ -353,6 +383,13 @@ export default function Home() {
     }
   }
 
+  const aiPanelUpdatedText =
+    aiMode === "daily"
+      ? aiOpportunitiesUpdatedAt
+        ? `更新時間：${new Date(aiOpportunitiesUpdatedAt).toLocaleString("zh-TW")}`
+        : "尚未載入 AI 今日機會"
+      : "顯示目前市場的自選股 AI 分析"
+
   if (!checkedAuth) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -364,27 +401,27 @@ export default function Home() {
   return (
     <div className="flex h-screen bg-black text-white overflow-hidden">
       <div
-        className={`p-3 shrink-0 relative transition-all duration-200 z-20
-            ${isSidebarCollapsed
+        className={`p-3 shrink-0 relative transition-all duration-200 z-20 ${
+          isSidebarCollapsed
             ? "bg-black border-r border-transparent"
             : "bg-zinc-900 border-r border-zinc-800"
-            }`}
+        }`}
         style={{ width: isSidebarCollapsed ? 64 : sidebarWidth }}
       >
         <div
-            className={`mb-4 flex items-center ${
+          className={`mb-4 flex items-center ${
             isSidebarCollapsed ? "justify-center" : "justify-between"
-        }`}
+          }`}
         >
-        {!isSidebarCollapsed && <h2 className="text-2xl font-bold"></h2>}
+          {!isSidebarCollapsed && <h2 className="text-2xl font-bold"></h2>}
 
-        <button
+          <button
             onClick={() => setIsSidebarCollapsed((prev) => !prev)}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
             title={isSidebarCollapsed ? "展開左側欄" : "收合左側欄"}
-        >
+          >
             {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </button>
+          </button>
         </div>
 
         {!isSidebarCollapsed && (
@@ -519,31 +556,31 @@ export default function Home() {
 
       <div className="flex-1 min-w-0 p-6 overflow-auto">
         <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
-                <h1 className="text-4xl font-bold">
-                {quote ? `${quote.symbol} ${quote.price}` : "Loading..."}
-                </h1>
-                <div className="mt-2 text-zinc-400">{quote?.name || "Loading company name..."}</div>
-            </div>
+          <div>
+            <h1 className="text-4xl font-bold">
+              {quote ? `${quote.symbol} ${quote.price}` : "Loading..."}
+            </h1>
+            <div className="mt-2 text-zinc-400">{quote?.name || "Loading company name..."}</div>
+          </div>
 
-            <div className="flex items-center gap-3">
-                <button
-                onClick={() => setShowChart((prev) => !prev)}
-                className="h-12 px-5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
-                >
-                {showChart ? "隱藏圖表" : "顯示圖表"}
-                </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowChart((prev) => !prev)}
+              className="h-12 px-5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
+            >
+              {showChart ? "隱藏圖表" : "顯示圖表"}
+            </button>
 
-                {isRightPanelCollapsed && (
-                <button
-                    onClick={() => setIsRightPanelCollapsed(false)}
-                    className="flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
-                    title="展開右側欄"
-                >
-                    <PanelRightOpen size={18} />
-                </button>
-                )}
-            </div>
+            {isRightPanelCollapsed && (
+              <button
+                onClick={() => setIsRightPanelCollapsed(false)}
+                className="flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
+                title="展開右側欄"
+              >
+                <PanelRightOpen size={18} />
+              </button>
+            )}
+          </div>
         </div>
 
         {error ? (
@@ -617,7 +654,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         setScannerMode("opportunities")
-                        runScanner("opportunities")
+                        void runScanner("opportunities")
                       }}
                       className={`px-3 py-2 rounded-md text-sm border ${
                         scannerMode === "opportunities"
@@ -631,7 +668,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         setScannerMode("leaderboard")
-                        runScanner("leaderboard")
+                        void runScanner("leaderboard")
                       }}
                       className={`px-3 py-2 rounded-md text-sm border ${
                         scannerMode === "leaderboard"
@@ -745,16 +782,24 @@ export default function Home() {
 
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
-                      onClick={() => runAiOpportunities(aiMode === "daily" ? 8 : 30)}
+                      onClick={() => {
+                        if (aiMode === "daily") {
+                          void runAiOpportunities(8)
+                        } else {
+                          void runWatchlistAiDaily(30)
+                        }
+                      }}
                       className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
                     >
-                      {loadingAiOpportunities ? "整理中..." : "重新整理"}
+                      {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistAiDaily)
+                        ? "整理中..."
+                        : "重新整理"}
                     </button>
 
                     <button
                       onClick={() => {
                         setAiMode("daily")
-                        runAiOpportunities(8)
+                        void runAiOpportunities(8)
                       }}
                       className={`px-3 py-2 rounded-md text-sm border ${
                         aiMode === "daily"
@@ -768,7 +813,7 @@ export default function Home() {
                     <button
                       onClick={() => {
                         setAiMode("watchlist")
-                        runAiOpportunities(30)
+                        void runWatchlistAiDaily(30)
                       }}
                       className={`px-3 py-2 rounded-md text-sm border ${
                         aiMode === "watchlist"
@@ -782,15 +827,13 @@ export default function Home() {
                 </div>
 
                 <div className="px-5 py-3 border-b border-violet-900/60 text-xs text-zinc-500">
-                  {aiOpportunitiesUpdatedAt
-                    ? `更新時間：${new Date(aiOpportunitiesUpdatedAt).toLocaleString("zh-TW")}`
-                    : "尚未載入 AI 今日機會"}
+                  {aiPanelUpdatedText}
                 </div>
 
                 <div className="p-4">
-                  {loadingAiOpportunities ? (
+                  {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistAiDaily) ? (
                     <div className="text-sm text-zinc-400">AI 結果載入中...</div>
-                  ) : (aiMode === "daily" ? aiOpportunityItems : watchlistAiItems).length === 0 ? (
+                  ) : (aiMode === "daily" ? aiOpportunityItems : watchlistAiDaily).length === 0 ? (
                     <div className="text-sm text-zinc-400">
                       {aiMode === "daily"
                         ? "尚未載入 AI 每日機會，按上方按鈕後才會顯示。"
@@ -798,13 +841,13 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(aiMode === "daily" ? aiOpportunityItems : watchlistAiItems).map((item, idx) => (
+                      {(aiMode === "daily" ? aiOpportunityItems : watchlistAiDaily).map((item: any, idx) => (
                         <button
                           key={`${item.symbol}-${idx}`}
                           onClick={() =>
                             setSelected({
                               symbol: item.symbol,
-                              market: marketPool,
+                              market: (item.market || marketPool) as "TW" | "US" | "CRYPTO",
                             })
                           }
                           className="w-full text-left rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70 transition"
@@ -818,22 +861,55 @@ export default function Home() {
                             </div>
 
                             <div className="text-right">
-                              <div className="text-violet-200 font-semibold">AI 分數 {item.score ?? "-"}</div>
+                              <div className="text-violet-200 font-semibold">
+                                {aiMode === "daily"
+                                  ? `AI 分數 ${item.score ?? "-"}`
+                                  : item.ai_report?.confidence != null
+                                  ? `信心 ${item.ai_report.confidence}`
+                                  : "已分析"}
+                              </div>
                               <div className="text-sm text-zinc-400">
-                                {item.change_pct != null ? `${item.change_pct}%` : "-"}
+                                {aiMode === "daily"
+                                  ? item.change_pct != null
+                                    ? `${item.change_pct}%`
+                                    : "-"
+                                  : item.interval || "-"}
                               </div>
                             </div>
                           </div>
 
                           <div className="mt-3 space-y-1 text-sm text-zinc-300">
-                            <div>
-                              <span className="text-zinc-500">AI 理由：</span>
-                              {item.reason || "-"}
-                            </div>
-                            <div>
-                              <span className="text-zinc-500">主要風險：</span>
-                              {item.risk || "-"}
-                            </div>
+                            {aiMode === "daily" ? (
+                              <>
+                                <div>
+                                  <span className="text-zinc-500">AI 理由：</span>
+                                  {item.reason || "-"}
+                                </div>
+                                <div>
+                                  <span className="text-zinc-500">主要風險：</span>
+                                  {item.risk || "-"}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div>
+                                  <span className="text-zinc-500">趨勢：</span>
+                                  {item.quick_summary?.trend || "-"}
+                                </div>
+                                <div>
+                                  <span className="text-zinc-500">估值：</span>
+                                  {item.quick_summary?.valuation || "-"}
+                                </div>
+                                <div>
+                                  <span className="text-zinc-500">風險：</span>
+                                  {item.quick_summary?.risk || "-"}
+                                </div>
+                                <div>
+                                  <span className="text-zinc-500">一句話：</span>
+                                  {item.quick_summary?.one_line || item.error || "-"}
+                                </div>
+                              </>
+                            )}
                           </div>
                         </button>
                       ))}
@@ -957,8 +1033,6 @@ export default function Home() {
             />
           </div>
         )}
-
-       
       </div>
     </div>
   )
