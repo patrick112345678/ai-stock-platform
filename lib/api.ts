@@ -273,6 +273,51 @@ export async function getScannerLeaderboard(
 
   return res.json()
 }
+export type AIOpportunityItem = {
+  symbol: string
+  name?: string | null
+  score?: number | null
+  price?: number | null
+  change_pct?: number | null
+  reason?: string | null
+  risk?: string | null
+}
+
+export type AIOpportunitiesResponse = {
+  market: MarketPool
+  updated_at?: string | null
+  source?: string
+  items: AIOpportunityItem[]
+}
+
+export async function getAIOpportunities(
+  market: MarketPool,
+  limit = 8
+): Promise<AIOpportunitiesResponse> {
+  const token = getToken()
+
+  const res = await fetch(`${API_BASE}/ai/opportunities`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      market,
+      limit,
+      lang: "zh",
+      force_refresh: false,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`取得 AI 今日機會失敗: ${text}`)
+  }
+
+  return res.json()
+}
+
 export type AIWatchlistDailyItem = {
   watchlist_id: number
   symbol: string

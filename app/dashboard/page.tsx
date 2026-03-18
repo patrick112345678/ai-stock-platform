@@ -15,9 +15,11 @@ import {
   getScannerOpportunities,
   getScannerLeaderboard,
   analyzeWatchlistDaily,
+  getAIOpportunities,
   type SearchItem,
   type AIAnalyzeResponse,
   type AIWatchlistDailyItem,
+  type AIOpportunityItem,
 } from "@/lib/api"
 
 type QuoteData = {
@@ -47,6 +49,9 @@ type WatchItem = {
 export default function Home() {
   const router = useRouter()
   const [watchlistDaily, setWatchlistDaily] = useState<AIWatchlistDailyItem[]>([])
+  const [aiOpportunities, setAiOpportunities] = useState<AIOpportunityItem[]>([])
+  const [aiOpportunitiesUpdatedAt, setAiOpportunitiesUpdatedAt] = useState<string | null>(null)
+  const [loadingAiOpportunities, setLoadingAiOpportunities] = useState(false)
   const [loadingWatchlistDaily, setLoadingWatchlistDaily] = useState(false)
   const [scannerResult, setScannerResult] = useState<any[]>([])
   const [scanning, setScanning] = useState(false)
@@ -135,6 +140,21 @@ export default function Home() {
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : "載入 watchlist 失敗")
+    }
+  }
+  async function runAiOpportunities() {
+    try {
+      setLoadingAiOpportunities(true)
+      setError("")
+
+      const result = await getAIOpportunities(marketPool, 8)
+      setAiOpportunities(Array.isArray(result.items) ? result.items : [])
+      setAiOpportunitiesUpdatedAt(result.updated_at || null)
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "AI 今日機會載入失敗")
+    } finally {
+      setLoadingAiOpportunities(false)
     }
   }
   async function runWatchlistDaily() {
@@ -533,13 +553,13 @@ export default function Home() {
               <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xl font-bold">
-                    {lang === "zh" ? "AI 市場掃描" : "AI Market Scanner"}
+                    {lang === "zh" ? "市場掃描" : "Market Scanner"}
                   </div>
                   <div className="mt-6 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
                     <div className="px-5 py-4 border-b border-zinc-800">
                       <div className="text-xl font-bold">自選股每日分析</div>
                       <div className="text-sm text-zinc-400 mt-1">
-                        依照目前自選股清單批次產生 AI 分析
+                        僅這個區塊為真正的 AI 生成內容，依照目前自選股清單批次產生分析
                       </div>
                     </div>
 
@@ -582,7 +602,7 @@ export default function Home() {
                   </div>
                   <div className="text-sm text-zinc-400 mt-1">
                     {lang === "zh"
-                      ? "快速查看今日機會與市場排行"
+                      ? "下方為技術掃描結果；AI 內容僅在 Premium 區塊顯示"
                       : "Quickly view opportunities and rankings"}
                   </div>
                 </div>
@@ -599,7 +619,7 @@ export default function Home() {
                         : "bg-zinc-800 border-zinc-700 text-zinc-300"
                     }`}
                   >
-                    {lang === "zh" ? "今日機會" : "Opportunities"}
+                    {lang === "zh" ? "技術今日機會" : "Technical Opportunities"}
                   </button>
 
                   <button
@@ -613,7 +633,13 @@ export default function Home() {
                         : "bg-zinc-800 border-zinc-700 text-zinc-300"
                     }`}
                   >
-                    {lang === "zh" ? "排行榜" : "Leaderboard"}
+                    {lang === "zh" ? "技術排行榜" : "Technical Leaderboard"}
+                  </button>
+                  <button
+                    onClick={runAiOpportunities}
+                    className="px-3 py-2 rounded-md text-sm bg-violet-600 hover:bg-violet-500 text-white"
+                  >
+                    {loadingAiOpportunities ? "載入中..." : "AI 今日機會（Premium）"}
                   </button>
                   <button
                     onClick={runWatchlistDaily}
@@ -632,7 +658,54 @@ export default function Home() {
                 </div>
               </div>
 
+              <div className="p-4 border-b border-zinc-800">
+                <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-violet-900/60">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-lg font-bold text-violet-200">AI 今日機會（Premium）</div>
+                        <div className="mt-1 text-sm text-zinc-400">
+                          此區塊為真正的 AI 生成內容。後端會定時更新快取，使用者點擊時僅載入已生成結果，避免每次點擊都消耗大量 token。
+                        </div>
+                      </div>
+                      <div className="text-xs text-zinc-500 shrink-0">
+                        {aiOpportunitiesUpdatedAt ? `更新時間：${new Date(aiOpportunitiesUpdatedAt).toLocaleString("zh-TW")}` : "尚未載入"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    {loadingAiOpportunities ? (
+                      <div className="text-sm text-zinc-400">AI 結果載入中...</div>
+                    ) : aiOpportunities.length === 0 ? (
+                      <div className="text-sm text-zinc-400">尚未載入 AI 今日機會，點上方按鈕後才會顯示。</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {aiOpportunities.map((item, idx) => (
+                          <div key={`${item.symbol}-${idx}`} className="rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <div className="font-semibold text-white">{idx + 1}. {item.symbol}</div>
+                                <div className="text-sm text-zinc-400">{item.name || "-"}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-violet-200 font-semibold">AI 分數 {item.score ?? "-"}</div>
+                                <div className="text-sm text-zinc-400">{item.change_pct != null ? `${item.change_pct}%` : "-"}</div>
+                              </div>
+                            </div>
+                            <div className="mt-3 space-y-1 text-sm text-zinc-300">
+                              <div><span className="text-zinc-500">AI 理由：</span>{item.reason || "-"}</div>
+                              <div><span className="text-zinc-500">主要風險：</span>{item.risk || "-"}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="p-4">
+                <div className="mb-3 text-sm text-zinc-500">下方為你自己的技術掃描結果，非 AI 生成。</div>
                 {scanning ? (
                   <div className="text-sm text-zinc-400">
                     {lang === "zh" ? "資料掃描中..." : "Scanning market data..."}
@@ -701,7 +774,7 @@ export default function Home() {
       </div>
       
       <div className="w-80 bg-zinc-900 p-4 border-l border-zinc-800 overflow-auto">
-        <h2 className="text-2xl font-bold mb-6">AI Analysis</h2>
+        <h2 className="text-2xl font-bold mb-6">技術面摘要</h2>
 
         <div className="space-y-4">
           <div className="bg-zinc-800 rounded-xl p-4">
@@ -715,35 +788,35 @@ export default function Home() {
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">Trend</div>
+            <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
             <div className="font-semibold">
               {aiData?.quick_summary?.trend || "Loading..."}
             </div>
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">Valuation</div>
+            <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
             <div className="font-semibold">
               {aiData?.quick_summary?.valuation || "Loading..."}
             </div>
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-1">Risk</div>
+            <div className="text-zinc-400 text-sm mb-1">技術風險</div>
             <div className="font-semibold">
               {aiData?.quick_summary?.risk || "Loading..."}
             </div>
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">One-line Summary</div>
+            <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
             <div className="text-sm leading-6">
               {aiData?.quick_summary?.one_line || "Loading..."}
             </div>
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">Bullish</div>
+            <div className="text-zinc-400 text-sm mb-2">偏多訊號</div>
             <div className="space-y-2">
               {aiData?.quick_summary?.bullish?.length ? (
                 aiData.quick_summary.bullish.map((item, idx) => (
@@ -758,7 +831,7 @@ export default function Home() {
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">Bearish / Risk</div>
+            <div className="text-zinc-400 text-sm mb-2">偏空 / 風險訊號</div>
             <div className="space-y-2">
               {aiData?.quick_summary?.bearish?.length ? (
                 aiData.quick_summary.bearish.map((item, idx) => (
@@ -773,7 +846,7 @@ export default function Home() {
           </div>
 
           <div className="bg-zinc-800 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm mb-2">Patterns</div>
+            <div className="text-zinc-400 text-sm mb-2">技術型態</div>
             <div className="space-y-2">
               {aiData?.quick_summary?.patterns?.length ? (
                 aiData.quick_summary.patterns.map((item, idx) => (
