@@ -18,7 +18,9 @@ import {
   deleteWatchlist,
   getAIOpportunities,
   getChart,
+  getDetail,
   getMultiTimeframe,
+  getPeers,
   getQuote,
   getScannerLeaderboard,
   getScannerOpportunities,
@@ -28,6 +30,8 @@ import {
   searchMarket,
   type AIAnalyzeResponse,
   type AIOpportunityItem,
+  type DetailData,
+  type PeerItem,
   type SearchItem,
 } from "@/lib/api"
 
@@ -141,6 +145,13 @@ export default function Home() {
   const [watchlistTechItems, setWatchlistTechItems] = useState<any[]>([])
   const [loadingWatchlistTech, setLoadingWatchlistTech] = useState(false)
   const [aiReportCache, setAiReportCache] = useState<Record<string, { report: any; loading?: boolean }>>({})
+
+  const [detailData, setDetailData] = useState<DetailData | null>(null)
+  const [peers, setPeers] = useState<PeerItem[]>([])
+  const [loadingPeers, setLoadingPeers] = useState(false)
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "fundamental" | "ranking" | "screener" | "ai" | "crypto" | "debug"
+  >("overview")
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
@@ -323,13 +334,19 @@ export default function Home() {
       setAiData(null)
       setMultiTimeframe([])
       setSignalTable([])
+      setDetailData(null)
 
       try {
-        const quoteJson = await getQuote(selected.symbol, selected.market)
+        const [quoteJson, detailJson] = await Promise.all([
+          getQuote(selected.symbol, selected.market),
+          getDetail(selected.symbol, selected.market),
+        ])
         setQuote(quoteJson)
+        setDetailData(detailJson)
       } catch (err) {
-        console.error("getQuote error:", err)
+        console.error("getQuote/getDetail error:", err)
         setQuote(null)
+        setDetailData(null)
       }
 
       try {
@@ -369,6 +386,15 @@ export default function Home() {
       void fetchData()
     }
   }, [selected, checkedAuth])
+
+  useEffect(() => {
+    if (activeTab !== "fundamental" || (selected.market !== "TW" && selected.market !== "US")) return
+    setLoadingPeers(true)
+    getPeers(selected.symbol, selected.market, 6)
+      .then((r) => setPeers(r.peers || []))
+      .catch(() => setPeers([]))
+      .finally(() => setLoadingPeers(false))
+  }, [activeTab, selected.symbol, selected.market])
 
   useEffect(() => {
     if (!checkedAuth) return
@@ -662,53 +688,120 @@ export default function Home() {
       </div>
 
       <div className="flex-1 min-w-0 p-6 overflow-auto">
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold">
-              {quote ? `${quote.symbol} ${quote.price}` : "Loading..."}
-            </h1>
-            <div className="mt-2 text-zinc-400">{quote?.name || "Loading company name..."}</div>
+        {/* Header & Metadata */}
+        <div className="mb-4">
+          <h1 className="text-3xl font-bold text-white">
+            {detailData?.name || quote?.name || "Loading..."}
+          </h1>
+          <div className="mt-1 text-sm text-zinc-400">
+            代號: {detailData?.raw_symbol || selected.symbol} | 市場: {detailData?.market || "-"} | 產業: {detailData?.display_industry || detailData?.industry || "-"}
           </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
+              資料品質 {detailData?.data_quality || "-"}
+            </span>
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
+              顯示週期 {detailData?.interval || "1d"}
+            </span>
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
+              抓取 period {detailData?.period || "-"}
+            </span>
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
+              型態 {aiData?.quick_summary?.patterns?.[0] || "-"}
+            </span>
+          </div>
+        </div>
 
-          <div className="flex items-center gap-3" />
+        {/* Price & Market Metrics */}
+        <div className="flex flex-wrap gap-6 mb-6">
+          <div>
+            <div className="text-2xl font-bold">現價 {detailData?.currency || "USD"} {detailData?.price ?? quote?.price ?? "-"}</div>
+            <div className={`text-sm mt-1 ${(quote?.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {(quote?.change ?? 0) >= 0 ? "↑" : "↓"} {quote?.change ?? "-"} ({(quote?.change_percent ?? 0).toFixed(2)}%)
+            </div>
+          </div>
+          <div className="border-l border-zinc-700 pl-6">
+            <div className="text-zinc-400 text-sm">52週高 / 低</div>
+            <div className="font-semibold">
+              {detailData?.fifty_two_week_high != null ? detailData.fifty_two_week_high.toFixed(2) : "-"} / {detailData?.fifty_two_week_low != null ? detailData.fifty_two_week_low.toFixed(2) : "-"}
+            </div>
+          </div>
+          <div className="border-l border-zinc-700 pl-6">
+            <div className="text-zinc-400 text-sm">市值</div>
+            <div className="font-semibold">
+              {detailData?.market_cap != null
+                ? detailData.market_cap >= 1e12
+                  ? `${(detailData.market_cap / 1e12).toFixed(2)}T`
+                  : detailData.market_cap >= 1e9
+                  ? `${(detailData.market_cap / 1e9).toFixed(2)}B`
+                  : detailData.market_cap >= 1e6
+                  ? `${(detailData.market_cap / 1e6).toFixed(2)}M`
+                  : detailData.market_cap.toFixed(0)
+                : "-"}
+            </div>
+          </div>
+        </div>
+
+        {/* Technical & Fundamental Summary */}
+        {aiData?.quick_summary && (
+          <div className="mb-6 flex flex-col gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="text-zinc-400 text-xs">整體趨勢</div>
+                <div className="font-semibold">{aiData.quick_summary.trend || "-"}</div>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="text-zinc-400 text-xs">估值評級</div>
+                <div className="font-semibold">{aiData.quick_summary.valuation || "-"}</div>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="text-zinc-400 text-xs">風險等級</div>
+                <div className="font-semibold">{aiData.quick_summary.risk || "-"}</div>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="text-zinc-400 text-xs">多方訊號</div>
+                <div className="font-semibold">{aiData.quick_summary.bullish?.length ? "有" : "0.0%"}</div>
+              </div>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="text-zinc-400 text-xs">空方訊號</div>
+                <div className="font-semibold">{aiData.quick_summary.bearish?.length ? "有" : "0.0%"}</div>
+              </div>
+            </div>
+            <div className="bg-blue-950/20 border border-blue-800/50 rounded-xl p-4 text-sm text-blue-100">
+              {aiData.quick_summary.one_line || "-"}
+            </div>
+          </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="flex gap-1 border-b border-zinc-800 mb-6 overflow-x-auto">
+          {(["overview", "fundamental", "ranking", "screener", "ai", "crypto", "debug"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition ${
+                activeTab === tab
+                  ? "border-red-500 text-red-400"
+                  : "border-transparent text-zinc-400 hover:text-white"
+              }`}
+            >
+              {tab === "overview" && "總覽"}
+              {tab === "fundamental" && "基本面 / 同業"}
+              {tab === "ranking" && "排行榜"}
+              {tab === "screener" && "選股器"}
+              {tab === "ai" && "AI研究"}
+              {tab === "crypto" && "Crypto"}
+              {tab === "debug" && "除錯 / 資料狀態"}
+            </button>
+          ))}
         </div>
 
         {error ? (
           <div className="text-red-400 text-lg">{error}</div>
         ) : (
           <>
-            {quote && (
-              <div className="grid grid-cols-2 gap-3 max-w-2xl mb-6">
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <div className="text-zinc-400 text-sm">Name</div>
-                  <div className="text-lg font-semibold">{quote.name}</div>
-                </div>
-
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <div className="text-zinc-400 text-sm">Exchange</div>
-                  <div className="text-lg font-semibold">{quote.exchange}</div>
-                </div>
-
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <div className="text-zinc-400 text-sm">Change</div>
-                  <div className={`text-lg font-semibold ${quote.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {quote.change}
-                  </div>
-                </div>
-
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <div className="text-zinc-400 text-sm">Change %</div>
-                  <div
-                    className={`text-lg font-semibold ${
-                      quote.change_percent >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {quote.change_percent}%
-                  </div>
-                </div>
-              </div>
-            )}
-
+            {activeTab === "overview" && quote && (
+            <>
             <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg mb-6 overflow-hidden">
               <button
                 onClick={() => setShowChart((prev) => !prev)}
@@ -1085,6 +1178,174 @@ export default function Home() {
                 )}
               </div>
             </div>
+            </>
+            )}
+
+            {activeTab === "fundamental" && (
+              <div className="space-y-6">
+                <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
+                  <h3 className="text-lg font-bold mb-4">基本面觀察</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div><span className="text-zinc-400 text-sm">PE</span><div className="font-semibold">{detailData?.pe != null ? detailData.pe.toFixed(2) : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">PB</span><div className="font-semibold">{detailData?.pb != null ? detailData.pb.toFixed(2) : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">EPS</span><div className="font-semibold">{detailData?.eps != null ? detailData.eps.toFixed(2) : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">ROE</span><div className="font-semibold">{detailData?.roe != null ? `${(detailData.roe * 100).toFixed(2)}%` : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">毛利率</span><div className="font-semibold">{detailData?.gross != null ? `${(detailData.gross * 100).toFixed(2)}%` : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">營收成長</span><div className="font-semibold">{detailData?.revenue != null ? `${(detailData.revenue * 100).toFixed(2)}%` : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">負債比</span><div className="font-semibold">{detailData?.debt != null ? detailData.debt.toFixed(2) : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">估值評級</span><div className="font-semibold">{aiData?.quick_summary?.valuation || detailData?.valuation || "-"}</div></div>
+                  </div>
+                  <div className="mt-3 text-sm text-zinc-400">產業：{detailData?.display_industry || detailData?.industry || "-"}</div>
+                </div>
+                <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
+                  <h3 className="text-lg font-bold mb-4">自動同業比較</h3>
+                  {loadingPeers ? (
+                    <div className="text-zinc-400">載入中...</div>
+                  ) : peers.length === 0 ? (
+                    <div className="text-zinc-400">目前無法取得有效同業資料（僅支援台股、美股）</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-zinc-400 border-b border-zinc-700">
+                            <th className="text-left py-2">代號</th>
+                            <th className="text-left py-2">名稱</th>
+                            <th className="text-right py-2">價格</th>
+                            <th className="text-right py-2">漲跌</th>
+                            <th className="text-right py-2">漲跌幅</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {peers.map((p) => (
+                            <tr key={p.symbol} className="border-b border-zinc-700/50">
+                              <td className="py-2">
+                                <button
+                                  onClick={() => setSelected({ symbol: p.symbol, market: selected.market })}
+                                  className="text-emerald-400 hover:underline"
+                                >
+                                  {p.symbol}
+                                </button>
+                              </td>
+                              <td className="py-2 text-zinc-300">{p.name || "-"}</td>
+                              <td className="py-2 text-right">{p.price != null ? p.price.toFixed(2) : "-"}</td>
+                              <td className={`py-2 text-right ${(p.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{p.change != null ? p.change.toFixed(2) : "-"}</td>
+                              <td className={`py-2 text-right ${(p.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{p.change_percent != null ? `${p.change_percent.toFixed(2)}%` : "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "ranking" && (
+              <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
+                <h3 className="text-lg font-bold mb-4">熱門排行榜</h3>
+                <div className="flex gap-4 mb-4">
+                  <button onClick={() => { setScannerMode("opportunities"); void runScanner("opportunities") }} className={`px-3 py-2 rounded-md border ${scannerMode === "opportunities" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"}`}>
+                    掃描雷達
+                  </button>
+                  <button onClick={() => { setScannerMode("leaderboard"); void runScanner("leaderboard") }} className={`px-3 py-2 rounded-md border ${scannerMode === "leaderboard" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"}`}>
+                    自選股分析
+                  </button>
+                </div>
+                {scanning ? (
+                  <div className="text-zinc-400">資料整理中...</div>
+                ) : (
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {(scannerMode === "opportunities" ? filteredScannerResult : watchlistScannerItems).map((item, idx) => (
+                      <button
+                        key={`${item.symbol}-${idx}`}
+                        onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: marketPool })}
+                        className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70"
+                      >
+                        <span className="font-semibold">{item.symbol}</span>
+                        <span className="ml-2 text-zinc-400">{item.name || "-"}</span>
+                        <span className="float-right text-emerald-300">分數 {item.uiScore}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "screener" && (
+              <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
+                <h3 className="text-lg font-bold mb-4">簡易選股器</h3>
+                <div className="mb-4 flex items-center gap-4">
+                  <span className="text-sm text-zinc-400">最低分數</span>
+                  <input type="range" min={0} max={100} step={5} value={techScoreMin} onChange={(e) => setTechScoreMin(Number(e.target.value))} className="w-36 accent-emerald-500" />
+                  <span className="text-sm font-semibold">{techScoreMin}</span>
+                </div>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {filteredScannerResult.filter((i) => (i.uiScore ?? 0) >= techScoreMin).map((item, idx) => (
+                    <button
+                      key={`${item.symbol}-${idx}`}
+                      onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: marketPool })}
+                      className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70"
+                    >
+                      <span className="font-semibold">{item.symbol}</span>
+                      <span className="ml-2 text-zinc-400">{item.name || "-"}</span>
+                      <span className="float-right text-emerald-300">分數 {item.uiScore}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "ai" && (
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 p-5">
+                  <h3 className="text-lg font-bold text-violet-200 mb-4">AI 分析（Premium）</h3>
+                  <div className="flex gap-2 flex-wrap mb-4">
+                    <button onClick={() => { setAiMode("daily"); void runAiOpportunities(8) }} className={`px-3 py-2 rounded-md text-sm border ${aiMode === "daily" ? "bg-violet-600 border-violet-500" : "bg-zinc-800 border-zinc-700"}`}>AI 每日機會</button>
+                    <button onClick={() => { setAiMode("watchlist"); void runWatchlistTech(50) }} className={`px-3 py-2 rounded-md text-sm border ${aiMode === "watchlist" ? "bg-fuchsia-600 border-fuchsia-500" : "bg-zinc-800 border-zinc-700"}`}>AI 自選股分析</button>
+                  </div>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {(aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).map((item: any, idx) => (
+                      <button
+                        key={`${item.symbol}-${idx}`}
+                        onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: (item.market || marketPool) as "TW" | "US" | "CRYPTO" })}
+                        className="w-full text-left rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70"
+                      >
+                        <span className="font-semibold">{item.symbol}</span>
+                        <span className="ml-2 text-zinc-400">{item.name || "-"}</span>
+                        <span className="float-right text-emerald-300">分數 {item.score ?? item.uiScore ?? "-"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "crypto" && (
+              <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
+                <h3 className="text-lg font-bold mb-4">Crypto 市場</h3>
+                <p className="text-zinc-400 text-sm mb-4">切換至 Crypto 市場後，在左側搜尋幣種即可查看。排行榜與選股器會顯示 Crypto 掃描結果。</p>
+                <button onClick={() => setMarketPool("CRYPTO")} className="px-4 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700">
+                  切換至 Crypto
+                </button>
+              </div>
+            )}
+
+            {activeTab === "debug" && (
+              <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
+                <h3 className="text-lg font-bold mb-4">資料狀態</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">實際使用代號</span><span>{detailData?.symbol || selected.symbol}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">原始輸入代號</span><span>{detailData?.raw_symbol || selected.symbol}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">資料來源</span><span>{selected.market === "CRYPTO" ? "Bybit API" : "Yahoo Finance"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">顯示週期</span><span>{detailData?.interval || "1d"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">抓取 interval</span><span>{detailData?.fetch_interval || "1d"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">抓取 period</span><span>{detailData?.period || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">資料品質</span><span>{detailData?.data_quality || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">Sector</span><span>{detailData?.sector || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">Industry</span><span>{detailData?.industry || "-"}</span></div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

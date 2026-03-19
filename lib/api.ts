@@ -137,7 +137,6 @@ export async function deleteWatchlist(id: number | string) {
 }
 
 export async function getQuote(symbol: string, market: MarketPool) {
-  console.log("DEBUG getQuote market =", market)
   const res = await fetch(
     `${API_BASE}/market/quote?symbol=${symbol}&market=${market}`
   )
@@ -147,6 +146,65 @@ export async function getQuote(symbol: string, market: MarketPool) {
     throw new Error(`quote API 錯誤: ${text}`)
   }
 
+  return res.json()
+}
+
+export type DetailData = {
+  symbol: string
+  raw_symbol: string
+  name: string | null
+  market: string
+  industry: string
+  sector?: string
+  display_industry?: string
+  price: number | null
+  change: number | null
+  change_percent: number | null
+  market_cap: number | null
+  fifty_two_week_high: number | null
+  fifty_two_week_low: number | null
+  pe: number | null
+  pb: number | null
+  eps: number | null
+  roe: number | null
+  gross: number | null
+  revenue: number | null
+  debt: number | null
+  valuation: string | null
+  currency?: string
+  exchange?: string
+  interval?: string
+  fetch_interval?: string
+  period?: string
+  data_quality?: string
+  errors?: string[]
+}
+
+export async function getDetail(symbol: string, market: MarketPool): Promise<DetailData> {
+  const res = await fetch(
+    `${API_BASE}/market/detail?symbol=${encodeURIComponent(symbol)}&market=${market}`
+  )
+  if (!res.ok) throw new Error("取得詳細資料失敗")
+  return res.json()
+}
+
+export type PeerItem = {
+  symbol: string
+  name: string | null
+  price: number | null
+  change: number | null
+  change_percent: number | null
+}
+
+export async function getPeers(
+  symbol: string,
+  market: "TW" | "US",
+  maxPeers = 6
+): Promise<{ peers: PeerItem[] }> {
+  const res = await fetch(
+    `${API_BASE}/market/peers?symbol=${encodeURIComponent(symbol)}&market=${market}&max_peers=${maxPeers}`
+  )
+  if (!res.ok) throw new Error("取得同業資料失敗")
   return res.json()
 }
 
