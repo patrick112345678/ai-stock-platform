@@ -432,13 +432,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!checkedAuth) return
-    if (scannerMode === "ranking") {
+    if (activeTab === "ranking") {
       void runLeaderboard()
-    } else {
+    } else if (scannerMode !== "ranking") {
       void runScanner(scannerMode)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkedAuth, marketPool, scanPool, scannerMode, leaderboardSortDir])
+  }, [checkedAuth, marketPool, scanPool, scannerMode, leaderboardSortDir, activeTab])
 
   useEffect(() => {
     if (!checkedAuth) return
@@ -845,7 +845,8 @@ export default function Home() {
         {!isSidebarCollapsed && (
           <div
             onMouseDown={() => setIsDraggingSidebar(true)}
-            className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-transparent"
+            className="absolute top-0 right-0 h-full w-2 cursor-col-resize border-r border-zinc-700 hover:border-zinc-500 hover:bg-zinc-600/30 z-10"
+            title="拖曳調整左側欄寬度"
           />
         )}
       </div>
@@ -1416,57 +1417,60 @@ export default function Home() {
                 <p className="text-zinc-500 text-sm mb-4">
                   {leaderboardSortDir === "gainers" ? "今日漲幅由高到低" : "今日跌幅由低到高"}，即時抓取失敗時 fallback 至 10 分鐘快取
                 </p>
-                <div className="flex gap-4 mb-4 flex-wrap">
-                  <button onClick={() => { setScannerMode("opportunities"); void runScanner("opportunities") }} className={`px-3 py-2 rounded-md border ${scannerMode === "opportunities" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"}`}>
-                    掃描雷達
-                  </button>
-                  <button onClick={() => { setScannerMode("leaderboard"); void runScanner("leaderboard") }} className={`px-3 py-2 rounded-md border ${scannerMode === "leaderboard" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"}`}>
-                    自選股分析
-                  </button>
-                  <button onClick={() => { setScannerMode("ranking"); void runLeaderboard() }} className={`px-3 py-2 rounded-md border ${scannerMode === "ranking" ? "bg-zinc-700 border-zinc-500" : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700"}`}>
+                <div className="flex gap-4 mb-4 flex-wrap items-center">
+                  <button onClick={() => { setScannerMode("ranking"); void runLeaderboard() }} className="px-3 py-2 rounded-md border bg-zinc-700 border-zinc-500">
                     排行榜
                   </button>
-                  {scannerMode === "ranking" && (
-                    <select value={leaderboardSortDir} onChange={(e) => { setLeaderboardSortDir(e.target.value as "gainers" | "losers"); void runLeaderboard() }} className="px-3 py-2 rounded-md border bg-zinc-800 border-zinc-700 text-sm">
-                      <option value="gainers">漲幅排行榜</option>
-                      <option value="losers">跌幅排行榜</option>
-                    </select>
-                  )}
+                  <select value={leaderboardSortDir} onChange={(e) => { setLeaderboardSortDir(e.target.value as "gainers" | "losers"); void runLeaderboard() }} className="px-3 py-2 rounded-md border bg-zinc-800 border-zinc-700 text-sm">
+                    <option value="gainers">漲幅排行榜</option>
+                    <option value="losers">跌幅排行榜</option>
+                  </select>
                 </div>
-                {scannerMode === "ranking" ? (
-                  leaderboardLoading ? (
-                    <div className="text-zinc-400">載入中...</div>
-                  ) : (() => {
+                {leaderboardLoading ? (
+                  <div className="text-zinc-400">載入中...</div>
+                ) : (() => {
                     const marketLabel = marketPool === "TW" ? "台股" : marketPool === "US" ? "美股" : "虛擬貨幣"
                     const items = marketPool === "TW" ? twLeaderboardItems : marketPool === "US" ? usLeaderboardItems : cryptoLeaderboardItems
                     return (
                       <div>
                         <h4 className="font-semibold mb-2">{marketLabel} {leaderboardSortDir === "gainers" ? "漲幅榜" : "跌幅榜"}</h4>
                         <div className="overflow-x-auto max-h-[28rem]">
-                          <table className="w-full text-sm">
+                          <table className="w-full text-sm border-collapse">
                             <thead>
                               <tr className="text-zinc-400 border-b border-zinc-700">
-                                <th className="text-left py-2 w-10">#</th>
-                                <th className="text-left py-2">標的</th>
-                                <th className="text-right py-2">現價</th>
-                                <th className="text-right py-2">漲跌</th>
-                                <th className="text-right py-2">漲跌幅</th>
-                                <th className="text-right py-2">成交量</th>
+                                <th className="text-center py-3 px-2 w-10">#</th>
+                                <th className="text-center py-3 px-3 min-w-[4rem]">代號</th>
+                                <th className="text-center py-3 px-3 min-w-[6rem]">名稱</th>
+                                <th className="text-center py-3 px-3 min-w-[5rem]">價格</th>
+                                <th className="text-center py-3 px-3 min-w-[5rem]">漲跌幅</th>
+                                <th className="text-center py-3 px-3 min-w-[4rem]">訊號分數</th>
+                                <th className="text-center py-3 px-3 min-w-[5rem]">整體趨勢</th>
+                                <th className="text-center py-3 px-3 min-w-[4rem]">RSI</th>
+                                <th className="text-center py-3 px-3 min-w-[4rem]">Vol 30D</th>
+                                <th className="text-center py-3 px-3 min-w-[4rem]">Funding</th>
+                                <th className="text-center py-3 px-3 min-w-[6rem]">型態</th>
+                                <th className="text-center py-3 px-4 min-w-[10rem]">選股原因</th>
                               </tr>
                             </thead>
                             <tbody>
                               {items.map((item, idx) => (
                                 <tr key={`${marketPool}-${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
-                                  <td className="py-2 text-zinc-500">{idx + 1}</td>
-                                  <td className="py-2">
+                                  <td className="py-3 px-2 text-center text-zinc-500">{idx + 1}</td>
+                                  <td className="py-3 px-3 text-center">
                                     <button onClick={() => setSelected({ symbol: marketPool === "TW" ? String(item.symbol ?? "").replace(".TW", "") : String(item.symbol ?? ""), market: marketPool })} className="text-emerald-400 hover:underline font-medium">
-                                      {formatStockLabel(item.symbol, item.name, marketPool)}
+                                      {marketPool === "TW" ? String(item.symbol ?? "").replace(".TW", "") : String(item.symbol ?? "")}
                                     </button>
                                   </td>
-                                  <td className="py-2 text-right">{item.price != null ? item.price.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change != null ? item.change.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change_percent != null ? `${Number(item.change_percent).toFixed(2)}%` : "-"}</td>
-                                  <td className="py-2 text-right text-zinc-400">{item.volume != null ? (item.volume >= 1e6 ? `${(item.volume / 1e6).toFixed(1)}M` : item.volume.toLocaleString()) : "-"}</td>
+                                  <td className="py-3 px-3 text-center text-zinc-200 whitespace-nowrap">{(item.name && String(item.name) !== String(item.symbol)) ? item.name : "-"}</td>
+                                  <td className="py-3 px-3 text-center whitespace-nowrap">{item.price != null ? item.price.toFixed(2) : "-"}</td>
+                                  <td className={`py-3 px-3 text-center whitespace-nowrap ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change_percent != null ? `${Number(item.change_percent).toFixed(2)}%` : "-"}</td>
+                                  <td className="py-3 px-3 text-center text-amber-300 whitespace-nowrap">{item.score != null ? Math.round(item.score) : "-"}</td>
+                                  <td className="py-3 px-3 text-center text-zinc-300 whitespace-nowrap">{item.trend ?? "-"}</td>
+                                  <td className="py-3 px-3 text-center text-zinc-400 whitespace-nowrap">{item.rsi != null ? Number(item.rsi).toFixed(2) : "-"}</td>
+                                  <td className="py-3 px-3 text-center text-zinc-400 whitespace-nowrap">{item.volume_ratio_30d != null ? Number(item.volume_ratio_30d).toFixed(2) : "-"}</td>
+                                  <td className="py-3 px-3 text-center text-zinc-500 whitespace-nowrap">{item.funding_rate != null ? Number(item.funding_rate).toFixed(4) : "-"}</td>
+                                  <td className="py-3 px-3 text-center text-zinc-300">{item.pattern ?? "-"}</td>
+                                  <td className="py-3 px-4 text-center text-zinc-400 text-xs max-w-[14rem]" title={item.summary ?? ""}>{item.summary ?? "-"}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1475,22 +1479,7 @@ export default function Home() {
                       </div>
                     )
                   })()
-                ) : scanning ? (
-                  <div className="text-zinc-400">資料整理中...</div>
-                ) : (
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
-                    {(scannerMode === "opportunities" ? filteredScannerResult : watchlistScannerItems).map((item, idx) => (
-                      <button
-                        key={`${item.symbol}-${idx}`}
-                        onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: marketPool })}
-                        className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70"
-                      >
-                        <span className="font-semibold">{formatStockLabel(item.symbol, item.name, (item.market || marketPool) as "TW" | "US" | "CRYPTO")}</span>
-                        <span className="float-right text-emerald-300">分數 {item.uiScore}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                }
               </div>
             )}
 
@@ -1715,32 +1704,32 @@ export default function Home() {
           <div className="p-4 overflow-auto relative h-[calc(100vh-80px)]">
 
             <div className="space-y-4">
-              <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">Symbol</div>
                 <div className="font-semibold">{selected.symbol}</div>
               </div>
 
-              <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">Market</div>
                 <div className="font-semibold">{selected.market}</div>
               </div>
 
-              <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
                 <div className="font-semibold">{aiData?.quick_summary?.trend || "Loading..."}</div>
               </div>
 
-              <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
                 <div className="font-semibold">{aiData?.quick_summary?.valuation || "Loading..."}</div>
               </div>
 
-              <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術風險</div>
                 <div className="font-semibold">{aiData?.quick_summary?.risk || "Loading..."}</div>
               </div>
 
-              <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
                 <div className="text-sm leading-6">{aiData?.quick_summary?.one_line || "Loading..."}</div>
               </div>
@@ -1870,7 +1859,7 @@ export default function Home() {
 
             <div
               onMouseDown={() => setIsDraggingRightPanel(true)}
-              className="absolute top-0 left-0 h-full w-2 cursor-col-resize bg-transparent hover:bg-zinc-500/80 active:bg-zinc-500"
+              className="absolute top-0 left-0 h-full w-2 cursor-col-resize border-l border-zinc-700 hover:border-zinc-500 hover:bg-zinc-600/30 active:bg-zinc-500/50 z-10"
               title="拖曳調整右側欄寬度"
             />
           </div>
