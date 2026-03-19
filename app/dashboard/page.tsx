@@ -12,7 +12,6 @@ import {
 } from "lucide-react"
 import TradingChart from "@/components/TradingChart"
 import { formatStockLabel, StockLabel } from "@/components/StockLabel"
-import { AIReportCard } from "@/components/AIReportCard"
 import {
   addWatchlist,
   analyzeAI,
@@ -150,7 +149,6 @@ export default function Home() {
   const [filterBreakout30d, setFilterBreakout30d] = useState(false)
   const [filterMacdGolden, setFilterMacdGolden] = useState(false)
   const [filterMacdDeath, setFilterMacdDeath] = useState(false)
-  const [filterSortOption, setFilterSortOption] = useState<string>("5. 漲幅排行榜")
   const [screenerDataSource, setScreenerDataSource] = useState<"live" | "cache" | null>(null)
   const [leaderboardSortDir, setLeaderboardSortDir] = useState<"gainers" | "losers">("gainers")
   const [twLeaderboardItems, setTwLeaderboardItems] = useState<any[]>([])
@@ -387,7 +385,6 @@ export default function Home() {
       if (filterBreakout30d) filter.breakout_30d = true
       if (filterMacdGolden) filter.macd_golden = true
       if (filterMacdDeath) filter.macd_death = true
-      if (filterSortOption) filter.sort_option = filterSortOption
       const result = await scanMarket(filter)
       if (result && "error" in result) {
         setError((result as { error: string }).error)
@@ -935,21 +932,15 @@ export default function Home() {
               {aiData.quick_summary.one_line || "-"}
             </div>
             {(() => {
-              const mainCacheKey = `${selected.symbol}-${selected.market}`
-              const mainCached = aiReportCache[mainCacheKey]
-              return mainCached?.report ? (
-                <div className="mt-4">
-                  <div className="text-sm font-semibold text-violet-300 mb-2">AI 研究報表</div>
-                  <AIReportCard report={mainCached.report} />
+              const q = aiData.quick_summary
+              const patterns = (q.patterns ?? []).slice(0, 2).join(" / ") || "暫無明確型態"
+              const bullish = (q.bullish ?? []).slice(0, 2).join(" ； ") || "資料不足"
+              const bearish = (q.bearish ?? []).slice(0, 2).join(" ； ") || "資料不足"
+              const aiBrief = `AI快評：${detailData?.name || selected.symbol}目前偏向${q.trend || "-"}，型態重點為${patterns}。主要優勢：${bullish}。主要風險：${bearish}。`
+              return (
+                <div className="mt-4 bg-violet-950/20 border border-violet-800/50 rounded-xl p-4 text-sm text-violet-100">
+                  {aiBrief}
                 </div>
-              ) : (
-                <button
-                  onClick={() => void runSingleAiAnalysis(selected.symbol, selected.market)}
-                  disabled={aiReportCache[mainCacheKey]?.loading}
-                  className="mt-4 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm"
-                >
-                  {aiReportCache[mainCacheKey]?.loading ? "AI 分析中..." : "生成 AI 研究報表"}
-                </button>
               )
             })()}
           </div>
@@ -1240,13 +1231,7 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).map((item: any, idx) => {
-                        const cacheKey = `${item.symbol}-${item.market || marketPool}`
-                        const cached = aiReportCache[cacheKey]
-                        const hasAiReport = cached?.report != null
-                        const aiLoading = cached?.loading === true
-
-                        return (
+                      {(aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).map((item: any, idx) => (
                           <div
                             key={`${item.symbol}-${idx}`}
                             className="rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3"
@@ -1282,21 +1267,6 @@ export default function Home() {
                                     ? `${item.change_percent}%`
                                     : "-"}
                                 </div>
-                                {aiMode === "watchlist" && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      void runSingleAiAnalysis(
-                                        normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool),
-                                        (item.market || marketPool) as "TW" | "US" | "CRYPTO"
-                                      )
-                                    }}
-                                    disabled={aiLoading}
-                                    className="mt-2 px-2 py-1 rounded text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white"
-                                  >
-                                    {aiLoading ? "AI 分析中..." : hasAiReport ? "已分析" : "AI 深度分析"}
-                                  </button>
-                                )}
                               </div>
                             </div>
 
@@ -1330,17 +1300,11 @@ export default function Home() {
                                       ))}
                                     </div>
                                   )}
-                                  {hasAiReport && cached?.report && (
-                                    <div className="mt-2 pt-2 border-t border-violet-900/50">
-                                      <AIReportCard report={cached.report} />
-                                    </div>
-                                  )}
                                 </>
                               )}
                             </div>
                           </div>
-                        )
-                      })}
+                        ))}
                     </div>
                   )}
                 </div>
@@ -1561,13 +1525,7 @@ export default function Home() {
                     <span className="text-sm">MACD 死亡交叉</span>
                   </label>
                 </div>
-                <div className="mb-4">
-                  <label className="text-xs text-zinc-500 block mb-1">排序</label>
-                  <select value={filterSortOption} onChange={(e) => setFilterSortOption(e.target.value)} className="rounded-lg bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-sm">
-                    <option value="5. 漲幅排行榜">漲幅排行榜</option>
-                    <option value="6. 跌幅排行榜">跌幅排行榜</option>
-                  </select>
-                </div>
+                <p className="text-xs text-zinc-500 mb-2">勾選的條件為「且」關係，須全部達標才會出現在結果中。</p>
                 <button onClick={() => void runScreenerFilter()} disabled={screenerFilterLoading} className="mb-4 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-medium">
                   {screenerFilterLoading ? "執行中..." : "執行選股"}
                 </button>
@@ -1580,18 +1538,19 @@ export default function Home() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-zinc-400 border-b border-zinc-700">
-                        <th className="text-left py-2">代號</th>
-                        <th className="text-left py-2">名稱</th>
-                        <th className="text-right py-2">價格</th>
-                        <th className="text-right py-2">漲跌幅</th>
-                        <th className="text-right py-2">訊號分數</th>
+                        <th className="text-center py-2">代號</th>
+                        <th className="text-center py-2">名稱</th>
+                        <th className="text-center py-2">價格</th>
+                        <th className="text-center py-2">漲跌幅</th>
+                        <th className="text-center py-2">訊號分數</th>
+                        <th className="text-center py-2 min-w-[10rem]">原因</th>
                         <th className="text-center py-2 w-20">操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {screenerFilterResult.filter((i) => (i.uiScore ?? 0) >= techScoreMin).map((item, idx) => (
                         <tr key={`${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
-                          <td className="py-2">
+                          <td className="py-2 text-center">
                             <button
                               onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: marketPool })}
                               className="text-emerald-400 hover:underline font-medium"
@@ -1599,12 +1558,15 @@ export default function Home() {
                               {item.symbol}
                             </button>
                           </td>
-                          <td className="py-2 text-zinc-300">{item.name || "-"}</td>
-                          <td className="py-2 text-right">{item.price != null ? Number(item.price).toFixed(2) : "-"}</td>
-                          <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          <td className="py-2 text-center text-zinc-300">{item.name || "-"}</td>
+                          <td className="py-2 text-center">{item.price != null ? Number(item.price).toFixed(2) : "-"}</td>
+                          <td className={`py-2 text-center ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
                             {item.change_percent != null ? `${Number(item.change_percent).toFixed(2)}%` : "-"}
                           </td>
-                          <td className="py-2 text-right text-emerald-300">{item.uiScore ?? "-"}</td>
+                          <td className="py-2 text-center text-emerald-300">{item.uiScore ?? "-"}</td>
+                          <td className="py-2 text-center text-zinc-400 text-xs max-w-[14rem]" title={Array.isArray(item.signals) ? item.signals.join("、") : (item.summary ?? "")}>
+                            {Array.isArray(item.signals) && item.signals.length > 0 ? item.signals.join("、") : (item.summary || "-")}
+                          </td>
                           <td className="py-2 text-center">
                             <button
                               onClick={(e) => { e.stopPropagation(); void handleAddScreenerToWatchlist(String(item.symbol ?? ""), marketPool) }}
