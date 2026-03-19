@@ -1,14 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://127.0.0.1:8000/:path*",
-      },
-    ];
-  },
+  // API 代理由 app/api/[...path]/route.ts 處理，正確轉發 Authorization header
 };
 
 export default nextConfig;

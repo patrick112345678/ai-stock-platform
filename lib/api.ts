@@ -7,16 +7,19 @@ export type MarketPool = "TW" | "US" | "CRYPTO"
 
 /** 檢查後端是否可連線且路由已載入 */
 export async function checkBackendHealth(): Promise<{ ok: boolean; routes?: string[] }> {
-  try {
-    const r = await fetch(`${API_BASE}/`)
-    if (!r.ok) return { ok: false }
-    const routesRes = await fetch(`${API_BASE}/health/routes`)
-    if (!routesRes.ok) return { ok: true }
-    const data = await routesRes.json()
-    return { ok: true, routes: data.market_routes }
-  } catch {
-    return { ok: false }
+  const urls: string[] = [`${API_BASE}/`]
+  if (typeof window !== "undefined" && API_BASE.startsWith("/")) {
+    urls.push("http://127.0.0.1:8000/")
   }
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, { cache: "no-store" })
+      if (r.ok) return { ok: true }
+    } catch {
+      continue
+    }
+  }
+  return { ok: false }
 }
 
 
@@ -96,6 +99,16 @@ export function saveToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem("access_token")
+}
+
+/** 若為 401/403 認證錯誤，清除 token 並回傳 true，呼叫方應導向登入 */
+export function handleAuthError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.includes("401") || msg.includes("403") || msg.includes("Not authenticated") || msg.includes("無法驗證")) {
+    clearToken()
+    return true
+  }
+  return false
 }
 export async function getWatchlist() {
   const token = getToken()

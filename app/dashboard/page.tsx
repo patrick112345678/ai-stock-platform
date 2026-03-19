@@ -19,6 +19,7 @@ import {
   checkBackendHealth,
   clearToken,
   deleteWatchlist,
+  handleAuthError,
   getAIOpportunities,
   getChart,
   getDetail,
@@ -131,7 +132,6 @@ export default function Home() {
   const searchRef = useRef<HTMLDivElement | null>(null)
 
   const [techScoreMin, setTechScoreMin] = useState(60)
-  const [techListCollapsed, setTechListCollapsed] = useState(false)
   const [screenerFilterResult, setScreenerFilterResult] = useState<any[]>([])
   const [screenerFilterLoading, setScreenerFilterLoading] = useState(false)
   const [filterMinPrice, setFilterMinPrice] = useState<number | "">("")
@@ -305,9 +305,11 @@ export default function Home() {
     } catch (err) {
       console.error(err)
       setWatchlist([])
-      if (!(err instanceof Error && (err.message.includes("401") || err.message.includes("登入")))) {
-        setError(err instanceof Error ? err.message : "載入 watchlist 失敗")
+      if (handleAuthError(err)) {
+        router.push("/login?msg=登入已過期，請重新登入")
+        return
       }
+      setError(err instanceof Error ? err.message : "載入 watchlist 失敗")
     }
   }
 
@@ -346,14 +348,11 @@ export default function Home() {
     try {
       setLeaderboardLoading(true)
       setError("")
-      const [twRes, usRes, cryptoRes] = await Promise.all([
-        getScannerLeaderboard("TW", scanPool, "change_percent", 20, leaderboardSortDir),
-        getScannerLeaderboard("US", scanPool, "change_percent", 20, leaderboardSortDir),
-        getScannerLeaderboard("CRYPTO", scanPool, "change_percent", 20, leaderboardSortDir),
-      ])
-      setTwLeaderboardItems(Array.isArray(twRes) ? twRes : [])
-      setUsLeaderboardItems(Array.isArray(usRes) ? usRes : [])
-      setCryptoLeaderboardItems(Array.isArray(cryptoRes) ? cryptoRes : [])
+      const res = await getScannerLeaderboard(marketPool, scanPool, "change_percent", 20, leaderboardSortDir)
+      const items = Array.isArray(res) ? res : []
+      setTwLeaderboardItems(marketPool === "TW" ? items : [])
+      setUsLeaderboardItems(marketPool === "US" ? items : [])
+      setCryptoLeaderboardItems(marketPool === "CRYPTO" ? items : [])
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : "排行榜載入失敗")
@@ -602,6 +601,11 @@ export default function Home() {
 
   async function handleAddWatchlist() {
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
+      if (!token) {
+        router.push("/login?msg=請先登入後再新增自選股")
+        return
+      }
       const symbol = symbolInput.trim().toUpperCase()
       if (!symbol) return
 
@@ -613,6 +617,10 @@ export default function Home() {
       setShowSearchDropdown(false)
     } catch (err) {
       console.error(err)
+      if (handleAuthError(err)) {
+        router.push("/login?msg=登入已過期，請重新登入")
+        return
+      }
       alert(err instanceof Error ? err.message : "新增失敗")
     }
   }
@@ -630,7 +638,26 @@ export default function Home() {
       await loadWatchlist()
     } catch (err) {
       console.error(err)
+      if (handleAuthError(err)) {
+        router.push("/login?msg=登入已過期，請重新登入")
+        return
+      }
       alert(err instanceof Error ? err.message : "刪除失敗")
+    }
+  }
+
+  async function handleAddScreenerToWatchlist(symbol: string, market: "TW" | "US" | "CRYPTO") {
+    try {
+      const normalized = normalizeWatchlistSymbol(symbol, market)
+      await addWatchlist(normalized, market)
+      await loadWatchlist()
+    } catch (err) {
+      console.error(err)
+      if (handleAuthError(err)) {
+        router.push("/login?msg=登入已過期，請重新登入")
+        return
+      }
+      alert(err instanceof Error ? err.message : "新增自選失敗")
     }
   }
 
@@ -652,9 +679,10 @@ export default function Home() {
   return (
     <div className="flex h-screen bg-black text-white overflow-hidden flex-col">
       {backendOk === false && (
-        <div className="bg-red-900/90 text-white px-4 py-3 text-center text-sm flex items-center justify-center gap-4">
+        <div className="bg-red-900/90 text-white px-4 py-3 text-center text-sm flex items-center justify-center gap-4 flex-wrap">
           <span>無法連線後端，搜尋、排行榜、選股器等將無法使用。</span>
-          <span className="font-semibold">請在終端執行：</span>
+          <span className="font-semibold">請確認：</span>
+          <span>1) 後端已執行於 port 8000；2) 瀏覽器可直接開啟 <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener noreferrer" className="underline">http://127.0.0.1:8000/</a></span>
           <code className="bg-black/40 px-2 py-1 rounded text-xs">cd stock-platform\backend 然後 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</code>
           <button onClick={() => checkBackendHealth().then((r) => setBackendOk(r.ok))} className="px-3 py-1 rounded bg-white/20 hover:bg-white/30 text-xs">
             重試
@@ -967,7 +995,7 @@ export default function Home() {
                 )}
                 <span className="text-lg font-semibold">圖表與關鍵摘要</span>
                 <span className="text-sm text-zinc-500 ml-auto">
-                  {showChart ? "縮起清單" : "展開清單"}
+                  {showChart ? "縮起" : "展開"}
                 </span>
               </button>
               {showChart && (
@@ -1013,7 +1041,7 @@ export default function Home() {
                   )}
                   <span className="text-lg font-semibold">即時掃描雷達</span>
                   <span className="text-sm text-zinc-500 ml-auto">
-                    {radarCollapsed ? "展開清單" : "縮起清單"}
+                    {radarCollapsed ? "展開" : "縮起"}
                   </span>
                 </button>
                 {!radarCollapsed && (
@@ -1061,16 +1089,9 @@ export default function Home() {
                         />
                         <span className="text-sm font-semibold text-white w-8 text-right">{techScoreMin}</span>
                       </div>
-                      <button
-                        onClick={() => setTechListCollapsed((prev) => !prev)}
-                        className="px-3 py-2 rounded-md text-sm bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
-                      >
-                        {techListCollapsed ? "展開清單" : "縮起清單"}
-                      </button>
                     </div>
 
-                    {!techListCollapsed && (
-                  <div className="p-4">
+                    <div className="p-4">
                     <div className="mb-3 text-sm text-zinc-500">
                       {scannerMode === "opportunities"
                         ? `依分數由高到低排序，低於 ${techScoreMin} 分的掃描結果不顯示。`
@@ -1137,7 +1158,6 @@ export default function Home() {
                       </div>
                     )}
                   </div>
-                )}
                   </div>
                 )}
               </div>
@@ -1154,7 +1174,7 @@ export default function Home() {
                   )}
                   <span className="text-lg font-semibold text-violet-200">AI 分析（Premium）</span>
                   <span className="text-sm text-zinc-500 ml-auto">
-                    {aiPanelCollapsed ? "展開清單" : "縮起清單"}
+                    {aiPanelCollapsed ? "展開" : "縮起"}
                   </span>
                 </button>
                 {!aiPanelCollapsed && (
@@ -1416,11 +1436,13 @@ export default function Home() {
                 {scannerMode === "ranking" ? (
                   leaderboardLoading ? (
                     <div className="text-zinc-400">載入中...</div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  ) : (() => {
+                    const marketLabel = marketPool === "TW" ? "台股" : marketPool === "US" ? "美股" : "虛擬貨幣"
+                    const items = marketPool === "TW" ? twLeaderboardItems : marketPool === "US" ? usLeaderboardItems : cryptoLeaderboardItems
+                    return (
                       <div>
-                        <h4 className="font-semibold mb-2">台股 {leaderboardSortDir === "gainers" ? "漲幅榜" : "跌幅榜"}</h4>
-                        <div className="overflow-x-auto max-h-80">
+                        <h4 className="font-semibold mb-2">{marketLabel} {leaderboardSortDir === "gainers" ? "漲幅榜" : "跌幅榜"}</h4>
+                        <div className="overflow-x-auto max-h-[28rem]">
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="text-zinc-400 border-b border-zinc-700">
@@ -1433,17 +1455,17 @@ export default function Home() {
                               </tr>
                             </thead>
                             <tbody>
-                              {twLeaderboardItems.map((item, idx) => (
-                                <tr key={`tw-${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
+                              {items.map((item, idx) => (
+                                <tr key={`${marketPool}-${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
                                   <td className="py-2 text-zinc-500">{idx + 1}</td>
                                   <td className="py-2">
-                                    <button onClick={() => setSelected({ symbol: String(item.symbol ?? "").replace(".TW", ""), market: "TW" })} className="text-emerald-400 hover:underline font-medium">
-                                      {formatStockLabel(item.symbol, item.name, "TW")}
+                                    <button onClick={() => setSelected({ symbol: marketPool === "TW" ? String(item.symbol ?? "").replace(".TW", "") : String(item.symbol ?? ""), market: marketPool })} className="text-emerald-400 hover:underline font-medium">
+                                      {formatStockLabel(item.symbol, item.name, marketPool)}
                                     </button>
                                   </td>
                                   <td className="py-2 text-right">{item.price != null ? item.price.toFixed(2) : "-"}</td>
                                   <td className={`py-2 text-right ${(item.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change != null ? item.change.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change_percent != null ? `${item.change_percent}%` : "-"}</td>
+                                  <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change_percent != null ? `${Number(item.change_percent).toFixed(2)}%` : "-"}</td>
                                   <td className="py-2 text-right text-zinc-400">{item.volume != null ? (item.volume >= 1e6 ? `${(item.volume / 1e6).toFixed(1)}M` : item.volume.toLocaleString()) : "-"}</td>
                                 </tr>
                               ))}
@@ -1451,74 +1473,8 @@ export default function Home() {
                           </table>
                         </div>
                       </div>
-                      <div>
-                        <h4 className="font-semibold mb-2">美股 {leaderboardSortDir === "gainers" ? "漲幅榜" : "跌幅榜"}</h4>
-                        <div className="overflow-x-auto max-h-80">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="text-zinc-400 border-b border-zinc-700">
-                                <th className="text-left py-2 w-10">#</th>
-                                <th className="text-left py-2">標的</th>
-                                <th className="text-right py-2">現價</th>
-                                <th className="text-right py-2">漲跌</th>
-                                <th className="text-right py-2">漲跌幅</th>
-                                <th className="text-right py-2">成交量</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {usLeaderboardItems.map((item, idx) => (
-                                <tr key={`us-${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
-                                  <td className="py-2 text-zinc-500">{idx + 1}</td>
-                                  <td className="py-2">
-                                    <button onClick={() => setSelected({ symbol: String(item.symbol ?? ""), market: "US" })} className="text-emerald-400 hover:underline font-medium">
-                                      {formatStockLabel(item.symbol, item.name, "US")}
-                                    </button>
-                                  </td>
-                                  <td className="py-2 text-right">{item.price != null ? item.price.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change != null ? item.change.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change_percent != null ? `${item.change_percent}%` : "-"}</td>
-                                  <td className="py-2 text-right text-zinc-400">{item.volume != null ? (item.volume >= 1e6 ? `${(item.volume / 1e6).toFixed(1)}M` : item.volume.toLocaleString()) : "-"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                      <div>
-                        <h4 className="font-semibold mb-2">Crypto {leaderboardSortDir === "gainers" ? "漲幅榜" : "跌幅榜"}</h4>
-                        <div className="overflow-x-auto max-h-80">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="text-zinc-400 border-b border-zinc-700">
-                                <th className="text-left py-2 w-10">#</th>
-                                <th className="text-left py-2">標的</th>
-                                <th className="text-right py-2">現價</th>
-                                <th className="text-right py-2">漲跌</th>
-                                <th className="text-right py-2">漲跌幅</th>
-                                <th className="text-right py-2">成交量</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {cryptoLeaderboardItems.map((item, idx) => (
-                                <tr key={`crypto-${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
-                                  <td className="py-2 text-zinc-500">{idx + 1}</td>
-                                  <td className="py-2">
-                                    <button onClick={() => setSelected({ symbol: String(item.symbol ?? ""), market: "CRYPTO" })} className="text-emerald-400 hover:underline font-medium">
-                                      {formatStockLabel(item.symbol, item.name, "CRYPTO")}
-                                    </button>
-                                  </td>
-                                  <td className="py-2 text-right">{item.price != null ? item.price.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change != null ? item.change.toFixed(2) : "-"}</td>
-                                  <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>{item.change_percent != null ? `${item.change_percent}%` : "-"}</td>
-                                  <td className="py-2 text-right text-zinc-400">{item.volume != null ? (item.volume >= 1e6 ? `${(item.volume / 1e6).toFixed(1)}M` : item.volume.toLocaleString()) : "-"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  )
+                    )
+                  })()
                 ) : scanning ? (
                   <div className="text-zinc-400">資料整理中...</div>
                 ) : (
@@ -1631,18 +1587,47 @@ export default function Home() {
                   <input type="range" min={0} max={100} step={5} value={techScoreMin} onChange={(e) => setTechScoreMin(Number(e.target.value))} className="w-36 accent-emerald-500" />
                   <span className="text-sm font-semibold">{techScoreMin}</span>
                 </div>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {screenerFilterResult.filter((i) => (i.uiScore ?? 0) >= techScoreMin).map((item, idx) => (
-                    <button
-                      key={`${item.symbol}-${idx}`}
-                      onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: marketPool })}
-                      className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70"
-                    >
-                      <span className="font-semibold">{formatStockLabel(item.symbol, item.name, marketPool)}</span>
-                      <span className="float-right text-emerald-300">分數 {item.uiScore}</span>
-                      {item.change_percent != null && <span className="ml-2 text-zinc-500 text-sm">{item.change_percent}%</span>}
-                    </button>
-                  ))}
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-zinc-400 border-b border-zinc-700">
+                        <th className="text-left py-2">代號</th>
+                        <th className="text-left py-2">名稱</th>
+                        <th className="text-right py-2">價格</th>
+                        <th className="text-right py-2">漲跌幅</th>
+                        <th className="text-right py-2">訊號分數</th>
+                        <th className="text-center py-2 w-20">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {screenerFilterResult.filter((i) => (i.uiScore ?? 0) >= techScoreMin).map((item, idx) => (
+                        <tr key={`${item.symbol}-${idx}`} className="border-b border-zinc-700/50 hover:bg-zinc-800/50">
+                          <td className="py-2">
+                            <button
+                              onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: marketPool })}
+                              className="text-emerald-400 hover:underline font-medium"
+                            >
+                              {item.symbol}
+                            </button>
+                          </td>
+                          <td className="py-2 text-zinc-300">{item.name || "-"}</td>
+                          <td className="py-2 text-right">{item.price != null ? Number(item.price).toFixed(2) : "-"}</td>
+                          <td className={`py-2 text-right ${(item.change_percent ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {item.change_percent != null ? `${Number(item.change_percent).toFixed(2)}%` : "-"}
+                          </td>
+                          <td className="py-2 text-right text-emerald-300">{item.uiScore ?? "-"}</td>
+                          <td className="py-2 text-center">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); void handleAddScreenerToWatchlist(String(item.symbol ?? ""), marketPool) }}
+                              className="px-2 py-1 rounded text-xs bg-zinc-700 hover:bg-zinc-600 border border-zinc-600"
+                            >
+                              加入自選
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
                 {screenerFilterResult.length === 0 && !screenerFilterLoading && (
                   <p className="text-sm text-zinc-500 mt-4">設定條件後按下「執行選股」即可篩選。台股 / 美股 / Crypto 皆支援。</p>

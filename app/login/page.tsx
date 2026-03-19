@@ -1,14 +1,19 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { loginUser, saveToken } from "@/lib/api"
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  useEffect(() => {
+    const msg = searchParams.get("msg")
+    if (msg) setError(msg)
+  }, [searchParams])
   const [loading, setLoading] = useState(false)
 
   async function handleLogin(e: React.FormEvent) {
