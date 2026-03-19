@@ -1,5 +1,23 @@
-const API_BASE = "http://127.0.0.1:8000"
+// 優先使用同源代理 /api，避免 CORS；若設了 NEXT_PUBLIC_API_BASE_URL 則直連後端
+const API_BASE =
+  typeof window !== "undefined"
+    ? (process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "/api")
+    : (process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000")
 export type MarketPool = "TW" | "US" | "CRYPTO"
+
+/** 檢查後端是否可連線且路由已載入 */
+export async function checkBackendHealth(): Promise<{ ok: boolean; routes?: string[] }> {
+  try {
+    const r = await fetch(`${API_BASE}/`)
+    if (!r.ok) return { ok: false }
+    const routesRes = await fetch(`${API_BASE}/health/routes`)
+    if (!routesRes.ok) return { ok: true }
+    const data = await routesRes.json()
+    return { ok: true, routes: data.market_routes }
+  } catch {
+    return { ok: false }
+  }
+}
 
 
 
@@ -236,9 +254,15 @@ export async function getSignalTable(
   return res.json()
 }
 
-export async function getChart(symbol: string, market: MarketPool) {
+export async function getChart(
+  symbol: string,
+  market: MarketPool,
+  interval: string = "1d",
+  period?: string
+) {
+  const p = period ?? (interval === "1h" ? "1mo" : interval === "4h" ? "2mo" : interval === "1wk" ? "2y" : "3mo")
   const res = await fetch(
-    `${API_BASE}/market/chart?symbol=${symbol}&market=${market}&interval=1d&period=3mo`
+    `${API_BASE}/market/chart?symbol=${symbol}&market=${market}&interval=${interval}&period=${p}`
   )
 
   if (!res.ok) {
@@ -305,17 +329,35 @@ export async function analyzeAI(
 
   return res.json()
 }
-export async function scanMarket(filter: any) {
-  const res = await fetch(`${API_BASE}/scanner/filter`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(filter),
-  })
+export type ScanFilterResult = {
+  items: any[]
+  source?: "live" | "cache"
+}
 
-  if (!res.ok) throw new Error("Scanner failed")
-  return res.json()
+export async function scanMarket(filter: any): Promise<ScanFilterResult | { items: any[]; error: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/scanner/filter`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(filter),
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`選股器失敗: ${text}`)
+    }
+    const data = await res.json()
+    if (Array.isArray(data)) return { items: data, source: "live" }
+    return data
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "選股器執行失敗"
+    if (msg.includes("fetch") || msg === "Failed to fetch") {
+      return { items: [], error: "無法連線後端，請確認後端已啟動 (http://127.0.0.1:8000)" }
+    }
+    throw e
+  }
 }
 export type ScanPool = "TOP30" | "TOP100" | "TOP800" | "ALL"
 
@@ -343,13 +385,15 @@ export async function getScannerLeaderboard(
   market: MarketPool,
   pool: ScanPool,
   sort: "change_percent" | "volume" = "change_percent",
-  limit = 20
+  limit = 20,
+  sortDirection: "gainers" | "losers" = "gainers"
 ) {
   const params = new URLSearchParams()
   params.set("market", market)
   params.set("pool", pool)
   params.set("sort", sort)
   params.set("limit", String(limit))
+  params.set("sort_direction", sortDirection)
 
   const res = await fetch(`${API_BASE}/scanner/leaderboard?${params.toString()}`)
 
@@ -402,7 +446,8 @@ export type AIOpportunitiesResponse = {
 
 export async function getAIOpportunities(
   market: MarketPool,
-  limit = 8
+  limit = 8,
+  forceRefresh = false
 ): Promise<AIOpportunitiesResponse> {
   const token = getToken()
 
@@ -416,7 +461,7 @@ export async function getAIOpportunities(
       market,
       limit,
       lang: "zh",
-      force_refresh: false,
+      force_refresh: forceRefresh,
     }),
   })
 
