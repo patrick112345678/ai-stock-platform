@@ -150,6 +150,34 @@ export async function getQuote(symbol: string, market: MarketPool) {
   return res.json()
 }
 
+export async function getMultiTimeframe(
+  symbol: string,
+  market: MarketPool,
+  lang = "zh"
+) {
+  const params = new URLSearchParams()
+  params.set("symbol", symbol)
+  params.set("market", market)
+  params.set("lang", lang)
+  const res = await fetch(`${API_BASE}/market/multi-timeframe?${params.toString()}`)
+  if (!res.ok) throw new Error("取得多時間框架失敗")
+  return res.json()
+}
+
+export async function getSignalTable(
+  symbol: string,
+  market: MarketPool,
+  lang = "zh"
+) {
+  const params = new URLSearchParams()
+  params.set("symbol", symbol)
+  params.set("market", market)
+  params.set("lang", lang)
+  const res = await fetch(`${API_BASE}/market/signal-table?${params.toString()}`)
+  if (!res.ok) throw new Error("取得技術訊號表失敗")
+  return res.json()
+}
+
 export async function getChart(symbol: string, market: MarketPool) {
   const res = await fetch(
     `${API_BASE}/market/chart?symbol=${symbol}&market=${market}&interval=1d&period=3mo`
@@ -189,7 +217,8 @@ export type AIAnalyzeResponse = {
 }
 export async function analyzeAI(
   symbol: string,
-  market: MarketPool
+  market: MarketPool,
+  options?: { quick_only?: boolean }
 ): Promise<AIAnalyzeResponse> {
   const token =
     typeof window !== "undefined"
@@ -207,7 +236,7 @@ export async function analyzeAI(
       market,
       interval: "1d",
       lang: "zh",
-      quick_only: true,
+      quick_only: options?.quick_only ?? true,
     }),
   })
 

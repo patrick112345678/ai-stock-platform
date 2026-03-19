@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
+  ChevronDown,
+  ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -12,20 +14,20 @@ import TradingChart from "@/components/TradingChart"
 import {
   addWatchlist,
   analyzeAI,
-  analyzeWatchlistDaily,
   clearToken,
   deleteWatchlist,
   getAIOpportunities,
   getChart,
+  getMultiTimeframe,
   getQuote,
   getScannerLeaderboard,
   getScannerOpportunities,
   getScannerWatchlist,
+  getSignalTable,
   getWatchlist,
   searchMarket,
   type AIAnalyzeResponse,
   type AIOpportunityItem,
-  type AIWatchlistDailyItem,
   type SearchItem,
 } from "@/lib/api"
 
@@ -121,24 +123,29 @@ export default function Home() {
 
   const [techScoreMin, setTechScoreMin] = useState(60)
   const [techListCollapsed, setTechListCollapsed] = useState(false)
+  const [radarCollapsed, setRadarCollapsed] = useState(true)
+  const [aiPanelCollapsed, setAiPanelCollapsed] = useState(true)
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false)
 
   const [aiMode, setAiMode] = useState<"daily" | "watchlist">("daily")
 
-  const [rightPanelWidth, setRightPanelWidth] = useState(320)
+  const [rightPanelWidth, setRightPanelWidth] = useState(420)
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false)
   const [isDraggingRightPanel, setIsDraggingRightPanel] = useState(false)
 
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
-  const [watchlistAiDaily, setWatchlistAiDaily] = useState<AIWatchlistDailyItem[]>([])
-  const [loadingWatchlistAiDaily, setLoadingWatchlistAiDaily] = useState(false)
+  const [multiTimeframe, setMultiTimeframe] = useState<any[]>([])
+  const [signalTable, setSignalTable] = useState<any[]>([])
+  const [watchlistTechItems, setWatchlistTechItems] = useState<any[]>([])
+  const [loadingWatchlistTech, setLoadingWatchlistTech] = useState(false)
+  const [aiReportCache, setAiReportCache] = useState<Record<string, { report: any; loading?: boolean }>>({})
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
       if (isDraggingRightPanel && !isRightPanelCollapsed) {
-        const nextWidth = Math.max(260, Math.min(520, window.innerWidth - e.clientX))
+        const nextWidth = Math.max(280, Math.min(720, window.innerWidth - e.clientX))
         setRightPanelWidth(nextWidth)
       }
 
@@ -258,18 +265,36 @@ export default function Home() {
     }
   }
 
-  async function runWatchlistAiDaily(limit = 20) {
+  async function runWatchlistTech(limit = 50) {
     try {
-      setLoadingWatchlistAiDaily(true)
+      setLoadingWatchlistTech(true)
       setError("")
 
-      const result = await analyzeWatchlistDaily(marketPool, limit)
-      setWatchlistAiDaily(Array.isArray(result.items) ? result.items : [])
+      const result = await getScannerWatchlist(marketPool, limit)
+      setWatchlistTechItems(Array.isArray(result) ? result : [])
     } catch (err) {
       console.error(err)
-      setError(err instanceof Error ? err.message : "自選股 AI 分析載入失敗")
+      setError(err instanceof Error ? err.message : "自選股技術分析載入失敗")
     } finally {
-      setLoadingWatchlistAiDaily(false)
+      setLoadingWatchlistTech(false)
+    }
+  }
+
+  async function runSingleAiAnalysis(symbol: string, market: "TW" | "US" | "CRYPTO") {
+    const key = `${symbol}-${market}`
+    setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: true } }))
+    try {
+      const result = await analyzeAI(symbol, market, { quick_only: false })
+      setAiReportCache((prev) => ({
+        ...prev,
+        [key]: { report: result.ai_report, loading: false },
+      }))
+    } catch (err) {
+      console.error(err)
+      setAiReportCache((prev) => ({
+        ...prev,
+        [key]: { report: null, loading: false },
+      }))
     }
   }
 
@@ -287,7 +312,7 @@ export default function Home() {
   useEffect(() => {
     if (!checkedAuth) return
     if (aiMode === "watchlist") {
-      void runWatchlistAiDaily(30)
+      void runWatchlistTech(50)
     }
   }, [aiMode, checkedAuth, marketPool])
 
@@ -296,6 +321,8 @@ export default function Home() {
       setLoading(true)
       setError("")
       setAiData(null)
+      setMultiTimeframe([])
+      setSignalTable([])
 
       try {
         const quoteJson = await getQuote(selected.symbol, selected.market)
@@ -319,6 +346,19 @@ export default function Home() {
       } catch (err) {
         console.error("analyzeAI error:", err)
         setAiData(null)
+      }
+
+      try {
+        const [mtf, sig] = await Promise.all([
+          getMultiTimeframe(selected.symbol, selected.market),
+          getSignalTable(selected.symbol, selected.market),
+        ])
+        setMultiTimeframe(Array.isArray(mtf) ? mtf : [])
+        setSignalTable(Array.isArray(sig) ? sig : [])
+      } catch (err) {
+        console.error("multi-timeframe/signal-table error:", err)
+        setMultiTimeframe([])
+        setSignalTable([])
       }
 
       setLoading(false)
@@ -453,7 +493,7 @@ export default function Home() {
       ? aiOpportunitiesUpdatedAt
         ? `更新時間：${new Date(aiOpportunitiesUpdatedAt).toLocaleString("zh-TW")}`
         : "尚未載入 AI 今日機會"
-      : "顯示目前市場的自選股 AI 分析"
+      : "顯示自選股技術分析，按「AI 深度分析」才呼叫 AI"
 
   if (!checkedAuth) {
     return (
@@ -630,24 +670,7 @@ export default function Home() {
             <div className="mt-2 text-zinc-400">{quote?.name || "Loading company name..."}</div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowChart((prev) => !prev)}
-              className="h-12 px-5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
-            >
-              {showChart ? "隱藏圖表" : "顯示圖表"}
-            </button>
-
-            {isRightPanelCollapsed && (
-              <button
-                onClick={() => setIsRightPanelCollapsed(false)}
-                className="flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white"
-                title="展開右側欄"
-              >
-                <PanelRightOpen size={18} />
-              </button>
-            )}
-          </div>
+          <div className="flex items-center gap-3" />
         </div>
 
         {error ? (
@@ -686,94 +709,112 @@ export default function Home() {
               </div>
             )}
 
-            {showChart ? (
-              <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 shadow-lg mb-6">
-                {loading && chartData.length === 0 ? (
-                  <div className="h-[520px] flex items-center justify-center text-zinc-400">
-                    K 線資料載入中...
-                  </div>
-                ) : chartData.length > 0 ? (
-                  <TradingChart data={chartData} />
+            <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg mb-6 overflow-hidden">
+              <button
+                onClick={() => setShowChart((prev) => !prev)}
+                className="w-full px-5 py-4 flex items-center gap-3 text-left hover:bg-zinc-800/50 transition"
+              >
+                {showChart ? (
+                  <ChevronDown className="shrink-0 text-zinc-400" size={20} />
                 ) : (
-                  <div className="h-[520px] flex items-center justify-center text-zinc-400">
-                    沒有 K 線資料
-                  </div>
+                  <ChevronRight className="shrink-0 text-zinc-400" size={20} />
                 )}
-              </div>
-            ) : (
-              <div className="bg-zinc-900 rounded-2xl p-8 border border-zinc-800 shadow-lg mb-6 text-zinc-400">
-                圖表目前已隱藏
-              </div>
-            )}
+                <span className="text-lg font-semibold">圖表與關鍵摘要</span>
+                <span className="text-sm text-zinc-500 ml-auto">
+                  {showChart ? "縮起清單" : "展開清單"}
+                </span>
+              </button>
+              {showChart && (
+                <div className="p-4 border-t border-zinc-800">
+                  {loading && chartData.length === 0 ? (
+                    <div className="h-[520px] flex items-center justify-center text-zinc-400">
+                      K 線資料載入中...
+                    </div>
+                  ) : chartData.length > 0 ? (
+                    <TradingChart data={chartData} />
+                  ) : (
+                    <div className="h-[520px] flex items-center justify-center text-zinc-400">
+                      沒有 K 線資料
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div className="space-y-6">
               <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg overflow-hidden">
-                <div className="px-5 py-4 border-b border-zinc-800 flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <div className="text-2xl font-bold">技術分析</div>
-                    <div className="text-sm text-zinc-400 mt-1">
-                      這裡是技術分析區，可切換每日機會與自選股分析，支援分數篩選、排序與清單收合。
+                <button
+                  onClick={() => setRadarCollapsed((prev) => !prev)}
+                  className="w-full px-5 py-4 flex items-center gap-3 text-left hover:bg-zinc-800/50 transition"
+                >
+                  {radarCollapsed ? (
+                    <ChevronRight className="shrink-0 text-zinc-400" size={20} />
+                  ) : (
+                    <ChevronDown className="shrink-0 text-zinc-400" size={20} />
+                  )}
+                  <span className="text-lg font-semibold">即時掃描雷達</span>
+                  <span className="text-sm text-zinc-500 ml-auto">
+                    {radarCollapsed ? "展開清單" : "縮起清單"}
+                  </span>
+                </button>
+                {!radarCollapsed && (
+                  <div className="p-4 border-t border-zinc-800 space-y-4">
+                    <div className="text-sm text-zinc-400">
+                      先用明確技術條件快速掃出值得先看的名單，不消耗 AI 額度。可切換掃描雷達與自選股分析，支援分數篩選與排序。
                     </div>
-                    <div className="text-xs text-zinc-500 mt-2">此區塊為技術分析結果，非 AI 生成。</div>
-                  </div>
-
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <button
-                      onClick={() => {
-                        setScannerMode("opportunities")
-                        void runScanner("opportunities")
-                      }}
-                      className={`px-3 py-2 rounded-md text-sm border ${
-                        scannerMode === "opportunities"
-                          ? "bg-zinc-700 border-zinc-500 text-white"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
-                      }`}
-                    >
-                      技術每日機會
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setScannerMode("leaderboard")
-                        void runScanner("leaderboard")
-                      }}
-                      className={`px-3 py-2 rounded-md text-sm border ${
-                        scannerMode === "leaderboard"
-                          ? "bg-zinc-700 border-zinc-500 text-white"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
-                      }`}
-                    >
-                      自選股分析
-                    </button>
-
-                    <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
-                      <span className="text-sm text-zinc-400 whitespace-nowrap">最低分數</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={techScoreMin}
-                        onChange={(e) => setTechScoreMin(Number(e.target.value))}
-                        className="w-36 accent-emerald-500"
-                      />
-                      <span className="text-sm font-semibold text-white w-8 text-right">{techScoreMin}</span>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        onClick={() => {
+                          setScannerMode("opportunities")
+                          void runScanner("opportunities")
+                        }}
+                        className={`px-3 py-2 rounded-md text-sm border ${
+                          scannerMode === "opportunities"
+                            ? "bg-zinc-700 border-zinc-500 text-white"
+                            : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                        }`}
+                      >
+                        掃描雷達
+                      </button>
+                      <button
+                        onClick={() => {
+                          setScannerMode("leaderboard")
+                          void runScanner("leaderboard")
+                        }}
+                        className={`px-3 py-2 rounded-md text-sm border ${
+                          scannerMode === "leaderboard"
+                            ? "bg-zinc-700 border-zinc-500 text-white"
+                            : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                        }`}
+                      >
+                        自選股分析
+                      </button>
+                      <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                        <span className="text-sm text-zinc-400 whitespace-nowrap">最低分數</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={techScoreMin}
+                          onChange={(e) => setTechScoreMin(Number(e.target.value))}
+                          className="w-36 accent-emerald-500"
+                        />
+                        <span className="text-sm font-semibold text-white w-8 text-right">{techScoreMin}</span>
+                      </div>
+                      <button
+                        onClick={() => setTechListCollapsed((prev) => !prev)}
+                        className="px-3 py-2 rounded-md text-sm bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
+                      >
+                        {techListCollapsed ? "展開清單" : "縮起清單"}
+                      </button>
                     </div>
 
-                    <button
-                      onClick={() => setTechListCollapsed((prev) => !prev)}
-                      className="px-3 py-2 rounded-md text-sm bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white"
-                    >
-                      {techListCollapsed ? "展開清單" : "縮起清單"}
-                    </button>
-                  </div>
-                </div>
-
-                {!techListCollapsed && (
+                    {!techListCollapsed && (
                   <div className="p-4">
                     <div className="mb-3 text-sm text-zinc-500">
                       {scannerMode === "opportunities"
-                        ? `依分數由高到低排序，低於 ${techScoreMin} 分的技術每日機會不顯示。`
+                        ? `依分數由高到低排序，低於 ${techScoreMin} 分的掃描結果不顯示。`
                         : `這裡顯示自選股中的技術分析結果，並依分數排序。`}
                     </div>
 
@@ -782,7 +823,7 @@ export default function Home() {
                     ) : (scannerMode === "opportunities" ? filteredScannerResult : watchlistScannerItems).length === 0 ? (
                       <div className="text-sm text-zinc-400">
                         {scannerMode === "opportunities"
-                          ? "目前沒有符合分數門檻的技術每日機會"
+                          ? "目前沒有符合分數門檻的掃描結果"
                           : "目前沒有符合分數門檻的自選股分析結果"}
                       </div>
                     ) : (
@@ -843,61 +884,70 @@ export default function Home() {
                     )}
                   </div>
                 )}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 overflow-hidden">
-                <div className="px-5 py-4 border-b border-violet-900/60 flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <div className="text-2xl font-bold text-violet-200">AI 分析（Premium）</div>
-                    <div className="mt-1 text-sm text-zinc-400">
-                      這裡是 AI 分析區，可切換 AI 每日機會與 AI 自選股分析。
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={() => {
-                        if (aiMode === "daily") {
-                          void runAiOpportunities(8)
-                        } else {
-                          void runWatchlistAiDaily(30)
-                        }
-                      }}
-                      className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
-                    >
-                      {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistAiDaily)
-                        ? "整理中..."
-                        : "重新整理"}
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setAiMode("daily")
+                <button
+                  onClick={() => setAiPanelCollapsed((prev) => !prev)}
+                  className="w-full px-5 py-4 flex items-center gap-3 text-left hover:bg-violet-900/30 transition"
+                >
+                  {aiPanelCollapsed ? (
+                    <ChevronRight className="shrink-0 text-violet-300" size={20} />
+                  ) : (
+                    <ChevronDown className="shrink-0 text-violet-300" size={20} />
+                  )}
+                  <span className="text-lg font-semibold text-violet-200">AI 分析（Premium）</span>
+                  <span className="text-sm text-zinc-500 ml-auto">
+                    {aiPanelCollapsed ? "展開清單" : "縮起清單"}
+                  </span>
+                </button>
+                {!aiPanelCollapsed && (
+                <div className="border-t border-violet-900/60">
+                <div className="px-5 py-4 flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => {
+                      if (aiMode === "daily") {
                         void runAiOpportunities(8)
-                      }}
-                      className={`px-3 py-2 rounded-md text-sm border ${
-                        aiMode === "daily"
-                          ? "bg-violet-600 border-violet-500 text-white"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
-                      }`}
-                    >
-                      AI 每日機會
-                    </button>
+                      } else {
+                        void runWatchlistTech(50)
+                      }
+                    }}
+                    className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
+                  >
+                    {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistTech)
+                      ? "整理中..."
+                      : "重新整理"}
+                  </button>
 
-                    <button
-                      onClick={() => {
-                        setAiMode("watchlist")
-                        void runWatchlistAiDaily(30)
-                      }}
-                      className={`px-3 py-2 rounded-md text-sm border ${
-                        aiMode === "watchlist"
-                          ? "bg-fuchsia-600 border-fuchsia-500 text-white"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-300"
-                      }`}
-                    >
-                      AI 自選股分析
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => {
+                      setAiMode("daily")
+                      void runAiOpportunities(8)
+                    }}
+                    className={`px-3 py-2 rounded-md text-sm border ${
+                      aiMode === "daily"
+                        ? "bg-violet-600 border-violet-500 text-white"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                    }`}
+                  >
+                    AI 每日機會
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setAiMode("watchlist")
+                      void runWatchlistTech(50)
+                    }}
+                    className={`px-3 py-2 rounded-md text-sm border ${
+                      aiMode === "watchlist"
+                        ? "bg-fuchsia-600 border-fuchsia-500 text-white"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                    }`}
+                  >
+                    AI 自選股分析
+                  </button>
                 </div>
 
                 <div className="px-5 py-3 border-b border-violet-900/60 text-xs text-zinc-500">
@@ -905,114 +955,164 @@ export default function Home() {
                 </div>
 
                 <div className="p-4">
-                  {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistAiDaily) ? (
-                    <div className="text-sm text-zinc-400">AI 結果載入中...</div>
-                  ) : (aiMode === "daily" ? aiOpportunityItems : watchlistAiDaily).length === 0 ? (
+                  {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistTech) ? (
+                    <div className="text-sm text-zinc-400">載入中...</div>
+                  ) : (aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).length === 0 ? (
                     <div className="text-sm text-zinc-400">
                       {aiMode === "daily"
                         ? "尚未載入 AI 每日機會，按上方按鈕後才會顯示。"
-                        : "目前沒有符合條件的 AI 自選股分析結果。"}
+                        : "目前沒有自選股技術分析結果，請先加入自選股。"}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(aiMode === "daily" ? aiOpportunityItems : watchlistAiDaily).map((item: any, idx) => (
-                        <button
-                          key={`${item.symbol}-${idx}`}
-                          onClick={() =>
-                            setSelected({
-                              symbol: item.symbol,
-                              market: (item.market || marketPool) as "TW" | "US" | "CRYPTO",
-                            })
-                          }
-                          className="w-full text-left rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70 transition"
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <div className="font-semibold text-white">
-                                {idx + 1}. {item.symbol}
-                              </div>
-                              <div className="text-sm text-zinc-400">{item.name || "-"}</div>
-                            </div>
+                      {(aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).map((item: any, idx) => {
+                        const cacheKey = `${item.symbol}-${item.market || marketPool}`
+                        const cached = aiReportCache[cacheKey]
+                        const hasAiReport = cached?.report != null
+                        const aiLoading = cached?.loading === true
 
-                            <div className="text-right">
-                              <div className="text-violet-200 font-semibold">
-                                {aiMode === "daily"
-                                  ? `AI 分數 ${item.score ?? "-"}`
-                                  : item.ai_report?.confidence != null
-                                  ? `信心 ${item.ai_report.confidence}`
-                                  : "已分析"}
-                              </div>
-                              <div className="text-sm text-zinc-400">
-                                {aiMode === "daily"
-                                  ? item.change_pct != null
+                        return (
+                          <div
+                            key={`${item.symbol}-${idx}`}
+                            className="rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <button
+                                onClick={() =>
+                                  setSelected({
+                                    symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool),
+                                    market: (item.market || marketPool) as "TW" | "US" | "CRYPTO",
+                                  })
+                                }
+                                className="flex-1 text-left min-w-0"
+                              >
+                                <div className="font-semibold text-white">
+                                  {idx + 1}. {normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool)}
+                                </div>
+                                <div className="text-sm text-zinc-400">{item.name || "-"}</div>
+                              </button>
+
+                              <div className="text-right shrink-0">
+                                {aiMode === "watchlist" && (
+                                  <div className="text-white font-semibold">
+                                    {item.price != null ? item.price : "-"}
+                                  </div>
+                                )}
+                                <div className="text-emerald-300 font-semibold">
+                                  {aiMode === "daily" ? `AI 分數 ${item.score ?? "-"}` : `技術分數 ${item.score ?? "-"}`}
+                                </div>
+                                <div className="text-sm text-zinc-400">
+                                  {item.change_pct != null
                                     ? `${item.change_pct}%`
-                                    : "-"
-                                  : item.interval || "-"}
+                                    : item.change_percent != null
+                                    ? `${item.change_percent}%`
+                                    : "-"}
+                                </div>
+                                {aiMode === "watchlist" && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void runSingleAiAnalysis(
+                                        normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool),
+                                        (item.market || marketPool) as "TW" | "US" | "CRYPTO"
+                                      )
+                                    }}
+                                    disabled={aiLoading}
+                                    className="mt-2 px-2 py-1 rounded text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white"
+                                  >
+                                    {aiLoading ? "AI 分析中..." : hasAiReport ? "已分析" : "AI 深度分析"}
+                                  </button>
+                                )}
                               </div>
                             </div>
-                          </div>
 
-                          <div className="mt-3 space-y-1 text-sm text-zinc-300">
-                            {aiMode === "daily" ? (
-                              <>
-                                <div>
-                                  <span className="text-zinc-500">AI 理由：</span>
-                                  {item.reason || "-"}
-                                </div>
-                                <div>
-                                  <span className="text-zinc-500">主要風險：</span>
-                                  {item.risk || "-"}
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div>
-                                  <span className="text-zinc-500">趨勢：</span>
-                                  {item.quick_summary?.trend || "-"}
-                                </div>
-                                <div>
-                                  <span className="text-zinc-500">估值：</span>
-                                  {item.quick_summary?.valuation || "-"}
-                                </div>
-                                <div>
-                                  <span className="text-zinc-500">風險：</span>
-                                  {item.quick_summary?.risk || "-"}
-                                </div>
-                                <div>
-                                  <span className="text-zinc-500">一句話：</span>
-                                  {item.quick_summary?.one_line || item.error || "-"}
-                                </div>
-                              </>
-                            )}
+                            <div className="mt-3 space-y-1 text-sm text-zinc-300">
+                              {aiMode === "daily" ? (
+                                <>
+                                  <div>
+                                    <span className="text-zinc-500">AI 理由：</span>
+                                    {item.reason || "-"}
+                                  </div>
+                                  <div>
+                                    <span className="text-zinc-500">主要風險：</span>
+                                    {item.risk || "-"}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div>
+                                    <span className="text-zinc-500">技術摘要：</span>
+                                    {item.summary || "-"}
+                                  </div>
+                                  {Array.isArray(item.signals) && item.signals.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {item.signals.map((sig: string, i: number) => (
+                                        <span
+                                          key={i}
+                                          className="px-2 py-0.5 rounded text-xs bg-zinc-800 border border-zinc-700 text-zinc-200"
+                                        >
+                                          {sig}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {hasAiReport && cached?.report && (
+                                    <div className="mt-2 pt-2 border-t border-violet-900/50 space-y-1">
+                                      <div>
+                                        <span className="text-zinc-500">AI 趨勢：</span>
+                                        {cached.report.trend || "-"}
+                                      </div>
+                                      <div>
+                                        <span className="text-zinc-500">AI 風險：</span>
+                                        {cached.report.risk || "-"}
+                                      </div>
+                                      <div>
+                                        <span className="text-zinc-500">AI 建議：</span>
+                                        {cached.report.action || "-"}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </button>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
+                </div>
+                )}
               </div>
             </div>
           </>
         )}
       </div>
 
-      <div className="relative shrink-0">
-        {!isRightPanelCollapsed && (
-          <div
-            className="bg-zinc-900 p-4 border-l border-zinc-800 overflow-auto relative transition-all duration-200 h-full"
-            style={{ width: rightPanelWidth }}
-          >
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <h2 className="text-2xl font-bold">技術面摘要</h2>
+      <div
+        className={`relative shrink-0 transition-all duration-200 z-20 ${
+          isRightPanelCollapsed
+            ? "bg-black border-l border-transparent"
+            : "bg-zinc-900 border-l border-zinc-800"
+        }`}
+        style={{ width: isRightPanelCollapsed ? 64 : rightPanelWidth }}
+      >
+        <div
+          className={`flex items-center ${isRightPanelCollapsed ? "justify-center pt-4" : "mb-4 justify-between gap-2"}`}
+        >
+          {!isRightPanelCollapsed && <h2 className="text-2xl font-bold">技術面</h2>}
 
-              <button
-                onClick={() => setIsRightPanelCollapsed(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
-                title="收合右側欄"
-              >
-                <PanelRightClose size={18} />
-              </button>
-            </div>
+          <button
+            onClick={() => setIsRightPanelCollapsed((prev) => !prev)}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+            title={isRightPanelCollapsed ? "展開右側欄" : "收合右側欄"}
+          >
+            {isRightPanelCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}
+          </button>
+        </div>
+
+        {!isRightPanelCollapsed && (
+          <div className="p-4 overflow-auto relative h-[calc(100vh-80px)]">
 
             <div className="space-y-4">
               <div className="bg-zinc-800 rounded-xl p-4">
@@ -1090,6 +1190,62 @@ export default function Home() {
                 </div>
               </div>
 
+              {multiTimeframe.length > 0 && (
+                <div className="bg-zinc-800 rounded-xl p-4">
+                  <div className="text-zinc-400 text-sm mb-2">多時間框架總覽</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-zinc-400 border-b border-zinc-700">
+                          <th className="text-left py-1">週期</th>
+                          <th className="text-left py-1">趨勢</th>
+                          <th className="text-right py-1">價格</th>
+                          <th className="text-right py-1">RSI</th>
+                          <th className="text-right py-1">分數</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {multiTimeframe.map((row: any, i: number) => (
+                          <tr key={i} className="border-b border-zinc-700/50">
+                            <td className="py-1.5">{row.period}</td>
+                            <td className="py-1.5">{row.trend}</td>
+                            <td className="text-right py-1.5">{row.price}</td>
+                            <td className="text-right py-1.5">{row.rsi}</td>
+                            <td className="text-right py-1.5">{row.score}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {signalTable.length > 0 && (
+                <div className="bg-zinc-800 rounded-xl p-4">
+                  <div className="text-zinc-400 text-sm mb-2">技術訊號總表</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-zinc-400 border-b border-zinc-700">
+                          <th className="text-left py-1">訊號</th>
+                          <th className="text-left py-1">狀態</th>
+                          <th className="text-left py-1">說明</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signalTable.map((row: any, i: number) => (
+                          <tr key={i} className="border-b border-zinc-700/50">
+                            <td className="py-1.5">{row.signal}</td>
+                            <td className="py-1.5">{row.status}</td>
+                            <td className="py-1.5 text-zinc-300">{row.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               <button
                 onClick={() => {
                   clearToken()
@@ -1103,7 +1259,8 @@ export default function Home() {
 
             <div
               onMouseDown={() => setIsDraggingRightPanel(true)}
-              className="absolute top-0 left-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-zinc-600/70"
+              className="absolute top-0 left-0 h-full w-2 cursor-col-resize bg-transparent hover:bg-zinc-500/80 active:bg-zinc-500"
+              title="拖曳調整右側欄寬度"
             />
           </div>
         )}
