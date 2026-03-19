@@ -273,6 +273,29 @@ export async function getScannerLeaderboard(
 
   return res.json()
 }
+
+export async function getScannerWatchlist(
+  market: MarketPool,
+  limit = 50
+) {
+  const token = getToken()
+  const params = new URLSearchParams()
+  params.set("market", market)
+  params.set("limit", String(limit))
+
+  const res = await fetch(`${API_BASE}/scanner/watchlist?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`取得自選股分析失敗: ${text}`)
+  }
+
+  return res.json()
+}
 export type AIOpportunityItem = {
   symbol: string
   name?: string | null

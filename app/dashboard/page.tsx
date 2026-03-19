@@ -20,6 +20,7 @@ import {
   getQuote,
   getScannerLeaderboard,
   getScannerOpportunities,
+  getScannerWatchlist,
   getWatchlist,
   searchMarket,
   type AIAnalyzeResponse,
@@ -50,6 +51,37 @@ type WatchItem = {
   id?: number | string
   symbol: string
   market: "TW" | "US" | "CRYPTO"
+  name?: string | null
+}
+
+function normalizeWatchlistSymbol(symbol: string, market: WatchItem["market"]) {
+  const s = String(symbol ?? "")
+    .trim()
+    .toUpperCase()
+
+  if (!s) return s
+
+  if (market === "TW") {
+    // scanner 输出多半是 "2330"；若使用者存了 "2330.TW"/"2330.TWO"，要统一去掉后缀
+    return s.replace(/\.TWO$/i, "").replace(/\.TW$/i, "").split(".")[0]
+  }
+
+  if (market === "US") {
+    // 保守处理：优先移除常见后缀 ".US"
+    if (s.endsWith(".US")) return s.slice(0, -3)
+
+    // 部分 tickers 可能用 "-" 表示（如 BRK-B），而你的 scanner/search 多半是 "BRK.B"
+    if (s.includes("-") && !s.includes(".")) return s.replace(/-/g, ".")
+
+    // 其余情况保持原样，避免破坏 BRK.B / 多段符号匹配
+    return s
+  }
+
+  // CRYPTO
+  // 统一成 Bybit 交易对格式：例如 BTC -> BTCUSDT、BTC-USDT -> BTCUSDT
+  const cleaned = s.replace(/[-\s]/g, "")
+  if (cleaned.endsWith("USDT")) return cleaned
+  return `${cleaned}USDT`
 }
 
 export default function Home() {
@@ -60,6 +92,7 @@ export default function Home() {
   const [loadingAiOpportunities, setLoadingAiOpportunities] = useState(false)
 
   const [scannerResult, setScannerResult] = useState<any[]>([])
+  const [watchlistScannerResult, setWatchlistScannerResult] = useState<any[]>([])
   const [scanning, setScanning] = useState(false)
   const [scannerMode, setScannerMode] = useState<"opportunities" | "leaderboard">("opportunities")
 
@@ -147,15 +180,16 @@ export default function Home() {
 
     try {
       setScanning(true)
-      setScannerResult([])
       setError("")
-
-      const result =
-        nextMode === "opportunities"
-          ? await getScannerOpportunities(marketPool, scanPool, 20)
-          : await getScannerLeaderboard(marketPool, scanPool, "change_percent", 20)
-
-      setScannerResult(Array.isArray(result) ? result : [])
+      if (nextMode === "opportunities") {
+        setScannerResult([])
+        const result = await getScannerOpportunities(marketPool, scanPool, 20)
+        setScannerResult(Array.isArray(result) ? result : [])
+      } else {
+        setWatchlistScannerResult([])
+        const result = await getScannerWatchlist(marketPool, 50)
+        setWatchlistScannerResult(Array.isArray(result) ? result : [])
+      }
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : "掃描失敗")
@@ -175,16 +209,32 @@ export default function Home() {
 
       const mapped: WatchItem[] = items.map((item: any) => ({
         id: item.id,
-        symbol: String(item.symbol).toUpperCase(),
         market: (item.market || "US") as "TW" | "US" | "CRYPTO",
+        name: item.name ?? null,
       }))
 
-      setWatchlist(mapped)
+      const normalizedMapped: WatchItem[] = mapped.map((w) => ({
+        ...w,
+        symbol: normalizeWatchlistSymbol(String(items.find((x: any) => x.id === w.id)?.symbol ?? w.symbol), w.market),
+      }))
 
-      if (mapped.length > 0) {
-        setSelected(mapped[0])
-        setMarketPool(mapped[0].market)
-        setSymbolInput(mapped[0].symbol)
+      // 如果 items.find 因为 id 缺失失败，至少兜底用原 symbol
+      const finalMapped: WatchItem[] = normalizedMapped.map((w, idx) => {
+        const original = items[idx]
+        const originalSymbol = original ? original.symbol : w.symbol
+        return {
+          ...w,
+          symbol: normalizeWatchlistSymbol(String(originalSymbol ?? w.symbol), w.market),
+          name: original?.name ?? w.name ?? null,
+        }
+      })
+
+      setWatchlist(finalMapped)
+
+      if (finalMapped.length > 0) {
+        setSelected(finalMapped[0])
+        setMarketPool(finalMapped[0].market)
+        setSymbolInput(finalMapped[0].symbol)
       }
     } catch (err) {
       console.error(err)
@@ -335,10 +385,24 @@ export default function Home() {
   }, [filteredWatchlist])
 
   const watchlistScannerItems = useMemo(() => {
+    if (scannerMode === "leaderboard") {
+      return [...watchlistScannerResult]
+        .map((item) => ({
+          ...item,
+          uiScore: Number(item.score ?? 0),
+        }))
+        .filter((item) => item.uiScore >= techScoreMin)
+        .sort((a, b) => {
+          if (b.uiScore !== a.uiScore) return b.uiScore - a.uiScore
+          return String(a.symbol ?? "").localeCompare(String(b.symbol ?? ""))
+        })
+    }
     return filteredScannerResult.filter((item) =>
-      watchlistSymbolSet.has(String(item.symbol ?? "").toUpperCase())
+      watchlistSymbolSet.has(
+        normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool).toUpperCase()
+      )
     )
-  }, [filteredScannerResult, watchlistSymbolSet])
+  }, [scannerMode, watchlistScannerResult, filteredScannerResult, watchlistSymbolSet, marketPool, techScoreMin])
 
   function handleSelectSearchItem(item: SearchItem) {
     setSymbolInput(item.symbol)
@@ -355,10 +419,11 @@ export default function Home() {
       const symbol = symbolInput.trim().toUpperCase()
       if (!symbol) return
 
-      await addWatchlist(symbol, marketPool)
+      const normalized = normalizeWatchlistSymbol(symbol, marketPool)
+      await addWatchlist(normalized, marketPool)
       await loadWatchlist()
 
-      setSelected({ symbol, market: marketPool })
+      setSelected({ symbol: normalized, market: marketPool })
       setShowSearchDropdown(false)
     } catch (err) {
       console.error(err)
@@ -528,7 +593,9 @@ export default function Home() {
                         className="flex-1 text-left min-w-0"
                       >
                         <div className="text-sm font-semibold leading-5 truncate">{item.symbol}</div>
-                        <div className="text-[11px] text-zinc-400 leading-4 uppercase">{item.market}</div>
+                        <div className="text-[11px] text-zinc-400 leading-4 truncate">
+                          {item.market === "TW" && item.name ? item.name : item.market}
+                        </div>
                       </button>
 
                       <button
@@ -725,7 +792,10 @@ export default function Home() {
                             key={`${item.symbol}-${idx}`}
                             onClick={() =>
                               setSelected({
-                                symbol: item.symbol,
+                                symbol: normalizeWatchlistSymbol(
+                                  String(item.symbol ?? ""),
+                                  marketPool
+                                ),
                                 market: marketPool,
                               })
                             }
@@ -734,7 +804,11 @@ export default function Home() {
                             <div className="flex items-start justify-between gap-4">
                               <div className="min-w-0">
                                 <div className="font-semibold text-white">
-                                  {idx + 1}. {item.symbol}
+                                  {idx + 1}.{" "}
+                                  {normalizeWatchlistSymbol(
+                                    String(item.symbol ?? ""),
+                                    marketPool
+                                  )}
                                 </div>
                                 <div className="text-sm text-zinc-400 truncate">{item.name || "-"}</div>
                               </div>
