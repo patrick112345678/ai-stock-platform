@@ -430,6 +430,24 @@ export default function Home() {
     }
   }
 
+  async function runQuickAiReport() {
+    const key = `${selected.symbol}-${selected.market}`
+    setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: true } }))
+    try {
+      setError("")
+      const result = await analyzeAI(selected.symbol, selected.market, { quick_only: false })
+      setAiReportCache((prev) => ({ ...prev, [key]: { report: result.ai_report, loading: false } }))
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : "AI 快速摘要生成失敗")
+      setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: false } }))
+    }
+  }
+
+  async function runFullAiReport() {
+    await runQuickAiReport()
+  }
+
   useEffect(() => {
     checkBackendHealth().then((r) => setBackendOk(r.ok))
   }, [])
@@ -1607,22 +1625,88 @@ export default function Home() {
             {activeTab === "ai" && (
               <div className="space-y-6">
                 <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 p-5">
-                  <h3 className="text-lg font-bold text-violet-200 mb-4">AI 分析（Premium）</h3>
-                  <div className="flex gap-2 flex-wrap mb-4">
-                    <button onClick={() => { setAiMode("daily"); void runAiOpportunities(8) }} className={`px-3 py-2 rounded-md text-sm border ${aiMode === "daily" ? "bg-violet-600 border-violet-500" : "bg-zinc-800 border-zinc-700"}`}>AI 每日機會</button>
-                    <button onClick={() => { setAiMode("watchlist"); void runWatchlistTech(50) }} className={`px-3 py-2 rounded-md text-sm border ${aiMode === "watchlist" ? "bg-fuchsia-600 border-fuchsia-500" : "bg-zinc-800 border-zinc-700"}`}>AI 自選股分析</button>
-                  </div>
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {(aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).map((item: any, idx) => (
-                      <button
-                        key={`${item.symbol}-${idx}`}
-                        onClick={() => setSelected({ symbol: normalizeWatchlistSymbol(String(item.symbol ?? ""), marketPool), market: (item.market || marketPool) as "TW" | "US" | "CRYPTO" })}
-                        className="w-full text-left rounded-xl border border-violet-900/50 bg-zinc-950/60 px-4 py-3 hover:bg-zinc-800/70"
-                      >
-                        <span className="font-semibold">{formatStockLabel(item.symbol, item.name, (item.market || marketPool) as "TW" | "US" | "CRYPTO")}</span>
-                        <span className="float-right text-emerald-300">分數 {item.score ?? item.uiScore ?? "-"}</span>
-                      </button>
-                    ))}
+                  <h3 className="text-lg font-bold text-violet-200 mb-4">AI 研究（）</h3>
+                  <p className="text-sm text-zinc-400 mb-4">AI 每日機會與 AI 自選股分析已整合在總覽的「AI 分析」區塊。</p>
+
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="text-sm font-semibold text-violet-300 mb-2">AI 快速摘要</h4>
+                      <div className="flex gap-2 flex-wrap mb-3">
+                        <button
+                          onClick={() => void runQuickAiReport()}
+                          disabled={!!aiReportCache[`${selected.symbol}-${selected.market}`]?.loading}
+                          className="px-3 py-2 rounded-md text-sm bg-violet-600 hover:bg-violet-500 border border-violet-500 disabled:opacity-50"
+                        >
+                          {aiReportCache[`${selected.symbol}-${selected.market}`]?.loading ? "生成中..." : "生成 AI 快速摘要"}
+                        </button>
+                        <button
+                          onClick={() => void runFullAiReport()}
+                          disabled={!!aiReportCache[`${selected.symbol}-${selected.market}`]?.loading}
+                          className="px-3 py-2 rounded-md text-sm border bg-zinc-800 border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
+                        >
+                          {aiReportCache[`${selected.symbol}-${selected.market}`]?.loading ? "生成中..." : "生成完整 AI 報告"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-semibold text-zinc-300 mb-2">系統快速結論</h4>
+                      <div className="rounded-lg bg-zinc-900/80 border border-zinc-800 p-4 text-sm leading-6 text-zinc-200">
+                        {aiData?.quick_summary?.one_line ? (
+                          <p>{aiData.quick_summary.one_line}</p>
+                        ) : (
+                          <p className="text-zinc-500">選定標的後會自動載入技術摘要。</p>
+                        )}
+                        {aiData?.quick_summary?.bullish?.length ? (
+                          <div className="mt-2">
+                            <span className="text-green-400 text-xs">偏多：</span>
+                            {aiData.quick_summary.bullish.join("；")}
+                          </div>
+                        ) : null}
+                        {aiData?.quick_summary?.bearish?.length ? (
+                          <div className="mt-1">
+                            <span className="text-red-400 text-xs">偏空：</span>
+                            {aiData.quick_summary.bearish.join("；")}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {aiReportCache[`${selected.symbol}-${selected.market}`]?.report && (
+                      <div>
+                        <h4 className="text-sm font-semibold text-violet-300 mb-2">AI 快速摘要結果</h4>
+                        <div className="rounded-lg bg-zinc-900/80 border border-zinc-800 p-4 text-sm text-zinc-200 whitespace-pre-wrap">
+                          {(() => {
+                            const r = aiReportCache[`${selected.symbol}-${selected.market}`]?.report
+                            return typeof r === "string" ? r : (r?.summary ?? "")
+                          })()}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <h4 className="text-sm font-semibold text-zinc-300 mb-2">完整 AI 研究報告</h4>
+                      {aiReportCache[`${selected.symbol}-${selected.market}`]?.report ? (
+                        <div className="rounded-lg bg-zinc-900/80 border border-zinc-800 p-4 text-sm text-zinc-200 space-y-2">
+                          {(() => {
+                            const r = aiReportCache[`${selected.symbol}-${selected.market}`]?.report
+                            if (!r) return null
+                            if (typeof r === "string") return <pre className="whitespace-pre-wrap">{r}</pre>
+                            return (
+                              <>
+                                {r.trend && <p><span className="text-zinc-500">趨勢：</span>{r.trend}</p>}
+                                {r.valuation && <p><span className="text-zinc-500">估值：</span>{r.valuation}</p>}
+                                {r.risk && <p><span className="text-zinc-500">風險：</span>{r.risk}</p>}
+                                {r.summary && <p className="mt-2">{r.summary}</p>}
+                                {r.action && <p><span className="text-zinc-500">建議：</span>{r.action}</p>}
+                              </>
+                            )
+                          })()}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-zinc-500">可先生成快速摘要，再視需要生成完整報告。</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
