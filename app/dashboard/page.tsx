@@ -30,6 +30,7 @@ import {
   getScannerWatchlist,
   getSignalTable,
   getWatchlist,
+  getWatchlistOverview,
   scanMarket,
   searchMarket,
   type AIAnalyzeResponse,
@@ -115,6 +116,7 @@ export default function Home() {
 
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [watchlist, setWatchlist] = useState<WatchItem[]>([])
+  const [watchlistOverview, setWatchlistOverview] = useState<{ id: number; symbol: string; market: string; change_percent?: number | null }[]>([])
   const [selected, setSelected] = useState<WatchItem>({
     symbol: "AAPL",
     market: "US",
@@ -294,6 +296,11 @@ export default function Home() {
       })
 
       setWatchlist(finalMapped)
+
+      // 背景載入自選股漲跌幅（供左側顯示）
+      getWatchlistOverview()
+        .then((r: any) => setWatchlistOverview(r?.items ?? []))
+        .catch(() => setWatchlistOverview([]))
 
       if (finalMapped.length > 0) {
         setSelected(finalMapped[0])
@@ -819,8 +826,19 @@ export default function Home() {
                         <div className="text-sm font-semibold leading-5 truncate">
                           {formatStockLabel(item.symbol, item.name, item.market)}
                         </div>
-                        <div className="text-[11px] text-zinc-400 leading-4 truncate">
-                          {item.market}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-zinc-400 leading-4 truncate">{item.market}</span>
+                          {(() => {
+                            const ov = watchlistOverview.find((o) => o.id === item.id)
+                            const pct = ov?.change_percent
+                            if (pct == null) return null
+                            const isUp = (pct ?? 0) >= 0
+                            return (
+                              <span className={`text-[11px] font-medium ${isUp ? "text-green-400" : "text-red-400"}`}>
+                                {isUp ? "+" : ""}{Number(pct).toFixed(2)}%
+                              </span>
+                            )
+                          })()}
                         </div>
                       </button>
 

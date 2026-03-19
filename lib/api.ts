@@ -126,6 +126,15 @@ export async function getWatchlist() {
   return res.json()
 }
 
+export async function getWatchlistOverview() {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/watchlist/overview`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`watchlist overview 錯誤: ${res.status}`)
+  return res.json()
+}
+
 export async function addWatchlist(symbol: string, market: MarketPool) {
   const token = getToken()
 
