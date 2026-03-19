@@ -336,18 +336,14 @@ export default function Home() {
       setSignalTable([])
       setDetailData(null)
 
-      try {
-        const [quoteJson, detailJson] = await Promise.all([
-          getQuote(selected.symbol, selected.market),
-          getDetail(selected.symbol, selected.market),
-        ])
-        setQuote(quoteJson)
-        setDetailData(detailJson)
-      } catch (err) {
-        console.error("getQuote/getDetail error:", err)
-        setQuote(null)
-        setDetailData(null)
-      }
+      const [quoteResult, detailResult] = await Promise.allSettled([
+        getQuote(selected.symbol, selected.market),
+        getDetail(selected.symbol, selected.market),
+      ])
+      setQuote(quoteResult.status === "fulfilled" ? quoteResult.value : null)
+      setDetailData(detailResult.status === "fulfilled" ? detailResult.value : null)
+      if (quoteResult.status === "rejected") console.warn("getQuote:", quoteResult.reason?.message)
+      if (detailResult.status === "rejected") console.warn("getDetail:", detailResult.reason?.message)
 
       try {
         const chartJson = await getChart(selected.symbol, selected.market)
@@ -365,18 +361,14 @@ export default function Home() {
         setAiData(null)
       }
 
-      try {
-        const [mtf, sig] = await Promise.all([
-          getMultiTimeframe(selected.symbol, selected.market),
-          getSignalTable(selected.symbol, selected.market),
-        ])
-        setMultiTimeframe(Array.isArray(mtf) ? mtf : [])
-        setSignalTable(Array.isArray(sig) ? sig : [])
-      } catch (err) {
-        console.error("multi-timeframe/signal-table error:", err)
-        setMultiTimeframe([])
-        setSignalTable([])
-      }
+      const [mtfResult, sigResult] = await Promise.allSettled([
+        getMultiTimeframe(selected.symbol, selected.market),
+        getSignalTable(selected.symbol, selected.market),
+      ])
+      setMultiTimeframe(mtfResult.status === "fulfilled" && Array.isArray(mtfResult.value) ? mtfResult.value : [])
+      setSignalTable(sigResult.status === "fulfilled" && Array.isArray(sigResult.value) ? sigResult.value : [])
+      if (mtfResult.status === "rejected") console.warn("getMultiTimeframe:", mtfResult.reason?.message)
+      if (sigResult.status === "rejected") console.warn("getSignalTable:", sigResult.reason?.message)
 
       setLoading(false)
     }
