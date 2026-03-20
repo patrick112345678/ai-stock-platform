@@ -1,3 +1,7 @@
+/** 在 Render/Vercel 上避免誤用 Edge，proxy fetch 較穩 */
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
 /**
  * 代理 /api/* 到後端，並轉發 Authorization 等 headers（Next.js rewrite 預設不轉發）
  *

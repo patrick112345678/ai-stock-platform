@@ -18,7 +18,6 @@ import { formatStockLabel, StockLabel } from "@/components/StockLabel"
 import {
   addWatchlist,
   analyzeAI,
-  checkBackendHealth,
   clearToken,
   fetchCurrentUser,
   deleteWatchlist,
@@ -187,7 +186,6 @@ export default function Home() {
   const [loadingWatchlistTech, setLoadingWatchlistTech] = useState(false)
   const [aiReportCache, setAiReportCache] = useState<Record<string, { report: any; loading?: boolean }>>({})
 
-  const [backendOk, setBackendOk] = useState<boolean | null>(null)
   const [detailData, setDetailData] = useState<DetailData | null>(null)
   const [peers, setPeers] = useState<PeerItem[]>([])
   const [loadingPeers, setLoadingPeers] = useState(false)
@@ -481,10 +479,6 @@ export default function Home() {
   }
 
   useEffect(() => {
-    checkBackendHealth().then((r) => setBackendOk(r.ok))
-  }, [])
-
-  useEffect(() => {
     if (!checkedAuth) return
     if (activeTab === "ranking") {
       void runLeaderboard()
@@ -737,17 +731,6 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-black text-white overflow-hidden flex-col">
-      {backendOk === false && (
-        <div className="bg-red-900/90 text-white px-4 py-3 text-center text-sm flex items-center justify-center gap-4 flex-wrap">
-          <span>無法連線後端，搜尋、排行榜、選股器等將無法使用。</span>
-          <span className="font-semibold">請確認：</span>
-          <span>1) 後端已執行於 port 8000；2) 瀏覽器可直接開啟 <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener noreferrer" className="underline">http://127.0.0.1:8000/</a></span>
-          <code className="bg-black/40 px-2 py-1 rounded text-xs">cd stock-platform\backend 然後 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</code>
-          <button onClick={() => checkBackendHealth().then((r) => setBackendOk(r.ok))} className="px-3 py-1 rounded bg-white/20 hover:bg-white/30 text-xs">
-            重試
-          </button>
-        </div>
-      )}
       <div className="flex flex-1 overflow-hidden">
       <div
         className={`p-3 shrink-0 relative transition-all duration-200 z-20 ${
