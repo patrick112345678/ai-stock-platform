@@ -11,12 +11,14 @@ import {
   PanelRightOpen,
 } from "lucide-react"
 import TradingChart from "@/components/TradingChart"
+import { AiReportPanel } from "@/components/AiReportPanel"
 import { formatStockLabel, StockLabel } from "@/components/StockLabel"
 import {
   addWatchlist,
   analyzeAI,
   checkBackendHealth,
   clearToken,
+  fetchCurrentUser,
   deleteWatchlist,
   handleAuthError,
   getAIOpportunities,
@@ -108,6 +110,8 @@ export default function Home() {
   const [scannerMode, setScannerMode] = useState<"opportunities" | "leaderboard" | "ranking">("opportunities")
 
   const [checkedAuth, setCheckedAuth] = useState(false)
+  /** 後端 /auth/me：付費／admin／AI_UNLIMITED_USERNAMES 為 true */
+  const [aiAccess, setAiAccess] = useState(false)
   const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
   const [scanPool, setScanPool] = useState<"TOP30" | "TOP100" | "TOP800" | "ALL">("TOP30")
   const [symbolInput, setSymbolInput] = useState("AAPL")
@@ -222,8 +226,16 @@ export default function Home() {
       return
     }
 
-    setCheckedAuth(true)
-    void loadWatchlist()
+    ;(async () => {
+      try {
+        const u = await fetchCurrentUser()
+        setAiAccess(!!u.ai_access)
+      } catch {
+        setAiAccess(false)
+      }
+      setCheckedAuth(true)
+      void loadWatchlist()
+    })()
   }, [router])
 
   async function runScanner(mode?: "opportunities" | "leaderboard") {
@@ -413,6 +425,10 @@ export default function Home() {
   }
 
   async function runSingleAiAnalysis(symbol: string, market: "TW" | "US" | "CRYPTO") {
+    if (!aiAccess) {
+      setError("完整 AI 分析為付費會員專用。")
+      return
+    }
     const key = `${symbol}-${market}`
     setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: true } }))
     try {
@@ -431,6 +447,10 @@ export default function Home() {
   }
 
   async function runQuickAiReport() {
+    if (!aiAccess) {
+      setError("完整 AI 報告為付費會員專用；免費會員仍可使用上方「系統快速結論」（技術規則摘要）。")
+      return
+    }
     const key = `${selected.symbol}-${selected.market}`
     setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: true } }))
     try {
@@ -439,13 +459,9 @@ export default function Home() {
       setAiReportCache((prev) => ({ ...prev, [key]: { report: result.ai_report, loading: false } }))
     } catch (err) {
       console.error(err)
-      setError(err instanceof Error ? err.message : "AI 快速摘要生成失敗")
+      setError(err instanceof Error ? err.message : "AI 研究報告生成失敗")
       setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: false } }))
     }
-  }
-
-  async function runFullAiReport() {
-    await runQuickAiReport()
   }
 
   useEffect(() => {
@@ -464,8 +480,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!checkedAuth) return
+    if (!aiAccess) {
+      setAiOpportunities([])
+      setAiOpportunitiesUpdatedAt(null)
+      return
+    }
     void runAiOpportunities(8)
-  }, [checkedAuth, marketPool])
+  }, [checkedAuth, marketPool, aiAccess])
 
   useEffect(() => {
     if (!checkedAuth) return
@@ -1207,16 +1228,27 @@ export default function Home() {
                 </button>
                 {!aiPanelCollapsed && (
                 <div className="border-t border-violet-900/60">
+                {!aiAccess && (
+                  <div className="px-5 py-3 text-sm text-amber-200 bg-amber-950/35 border-b border-amber-800/40">
+                    <strong>付費專區：</strong>AI 每日機會、完整研究報告需付費方案（或管理員／總帳號）。
+                    免費會員仍可使用技術選股、排行榜與系統快速結論。
+                  </div>
+                )}
                 <div className="px-5 py-4 flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => {
                       if (aiMode === "daily") {
+                        if (!aiAccess) {
+                          setError("AI 每日機會為付費會員專用。")
+                          return
+                        }
                         void runAiOpportunities(8, true)
                       } else {
                         void runWatchlistTech(50)
                       }
                     }}
-                    className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white"
+                    disabled={aiMode === "daily" && !aiAccess}
+                    className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {(aiMode === "daily" ? loadingAiOpportunities : loadingWatchlistTech)
                       ? "整理中..."
@@ -1226,7 +1258,7 @@ export default function Home() {
                   <button
                     onClick={() => {
                       setAiMode("daily")
-                      void runAiOpportunities(8)
+                      if (aiAccess) void runAiOpportunities(8)
                     }}
                     className={`px-3 py-2 rounded-md text-sm border ${
                       aiMode === "daily"
@@ -1262,7 +1294,9 @@ export default function Home() {
                   ) : (aiMode === "daily" ? aiOpportunityItems : watchlistTechItems).length === 0 ? (
                     <div className="text-sm text-zinc-400">
                       {aiMode === "daily"
-                        ? "尚未載入 AI 每日機會，按上方按鈕後才會顯示。"
+                        ? !aiAccess
+                          ? "AI 每日機會為付費會員專用，升級後即可載入。"
+                          : "尚未載入 AI 每日機會，按上方按鈕後才會顯示。"
                         : "目前沒有自選股技術分析結果，請先加入自選股。"}
                     </div>
                   ) : (
@@ -1625,33 +1659,41 @@ export default function Home() {
             {activeTab === "ai" && (
               <div className="space-y-6">
                 <div className="rounded-2xl border border-violet-800/70 bg-violet-950/20 p-5">
-                  <h3 className="text-lg font-bold text-violet-200 mb-4">AI 研究（）</h3>
-                  <p className="text-sm text-zinc-400 mb-4">AI 每日機會與 AI 自選股分析已整合在總覽的「AI 分析」區塊。</p>
+                  <h3 className="mb-4 text-lg font-bold text-violet-200">
+                    AI 研究分析
+                    {selected.symbol ? (
+                      <span className="ml-2 text-base font-normal text-zinc-400">· {selected.symbol}</span>
+                    ) : null}
+                  </h3>
+                  <p className="mb-4 text-sm text-zinc-400">
+                    下方「系統快速結論」為規則引擎摘要（免費）；「AI 研究報告」由模型依同一套資料延伸撰寫，兩者定位不同。
+                  </p>
+                  {!aiAccess && (
+                    <div className="mb-4 rounded-lg border border-amber-800/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
+                      完整 AI 報告與 AI 每日機會需<strong className="text-amber-300">付費會員</strong>。
+                      下方「系統快速結論」為免費技術規則摘要，無需付費。
+                    </div>
+                  )}
 
                   <div className="space-y-4">
                     <div>
-                      <h4 className="text-sm font-semibold text-violet-300 mb-2">AI 快速摘要</h4>
-                      <div className="flex gap-2 flex-wrap mb-3">
-                        <button
-                          onClick={() => void runQuickAiReport()}
-                          disabled={!!aiReportCache[`${selected.symbol}-${selected.market}`]?.loading}
-                          className="px-3 py-2 rounded-md text-sm bg-violet-600 hover:bg-violet-500 border border-violet-500 disabled:opacity-50"
-                        >
-                          {aiReportCache[`${selected.symbol}-${selected.market}`]?.loading ? "生成中..." : "生成 AI 快速摘要"}
-                        </button>
-                        <button
-                          onClick={() => void runFullAiReport()}
-                          disabled={!!aiReportCache[`${selected.symbol}-${selected.market}`]?.loading}
-                          className="px-3 py-2 rounded-md text-sm border bg-zinc-800 border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
-                        >
-                          {aiReportCache[`${selected.symbol}-${selected.market}`]?.loading ? "生成中..." : "生成完整 AI 報告"}
-                        </button>
-                      </div>
+                      <h4 className="mb-2 text-sm font-semibold text-violet-300">AI 研究報告</h4>
+                      <p className="mb-3 text-xs text-zinc-500">
+                        一鍵生成結構化報告（摘要、基本面、技術拆解、策略與操作細節）。若先前畫面曾出現英文欄位名，請重新生成以套用新版格式。
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void runQuickAiReport()}
+                        disabled={!aiAccess || !!aiReportCache[`${selected.symbol}-${selected.market}`]?.loading}
+                        className="rounded-md border border-violet-500 bg-violet-600 px-4 py-2 text-sm hover:bg-violet-500 disabled:opacity-50"
+                      >
+                        {aiReportCache[`${selected.symbol}-${selected.market}`]?.loading ? "生成中..." : "生成 AI 研究報告"}
+                      </button>
                     </div>
 
                     <div>
-                      <h4 className="text-sm font-semibold text-zinc-300 mb-2">系統快速結論</h4>
-                      <div className="rounded-lg bg-zinc-900/80 border border-zinc-800 p-4 text-sm leading-6 text-zinc-200">
+                      <h4 className="mb-2 text-sm font-semibold text-zinc-300">系統快速結論（規則摘要）</h4>
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-4 text-sm leading-6 text-zinc-200">
                         {aiData?.quick_summary?.one_line ? (
                           <p>{aiData.quick_summary.one_line}</p>
                         ) : (
@@ -1659,52 +1701,27 @@ export default function Home() {
                         )}
                         {aiData?.quick_summary?.bullish?.length ? (
                           <div className="mt-2">
-                            <span className="text-green-400 text-xs">偏多：</span>
+                            <span className="text-xs text-green-400">偏多：</span>
                             {aiData.quick_summary.bullish.join("；")}
                           </div>
                         ) : null}
                         {aiData?.quick_summary?.bearish?.length ? (
                           <div className="mt-1">
-                            <span className="text-red-400 text-xs">偏空：</span>
+                            <span className="text-xs text-red-400">偏空：</span>
                             {aiData.quick_summary.bearish.join("；")}
                           </div>
                         ) : null}
                       </div>
                     </div>
 
-                    {aiReportCache[`${selected.symbol}-${selected.market}`]?.report && (
-                      <div>
-                        <h4 className="text-sm font-semibold text-violet-300 mb-2">AI 快速摘要結果</h4>
-                        <div className="rounded-lg bg-zinc-900/80 border border-zinc-800 p-4 text-sm text-zinc-200 whitespace-pre-wrap">
-                          {(() => {
-                            const r = aiReportCache[`${selected.symbol}-${selected.market}`]?.report
-                            return typeof r === "string" ? r : (r?.summary ?? "")
-                          })()}
-                        </div>
-                      </div>
-                    )}
-
                     <div>
-                      <h4 className="text-sm font-semibold text-zinc-300 mb-2">完整 AI 研究報告</h4>
+                      <h4 className="mb-2 text-sm font-semibold text-zinc-300">結構化研究輸出</h4>
                       {aiReportCache[`${selected.symbol}-${selected.market}`]?.report ? (
-                        <div className="rounded-lg bg-zinc-900/80 border border-zinc-800 p-4 text-sm text-zinc-200 space-y-2">
-                          {(() => {
-                            const r = aiReportCache[`${selected.symbol}-${selected.market}`]?.report
-                            if (!r) return null
-                            if (typeof r === "string") return <pre className="whitespace-pre-wrap">{r}</pre>
-                            return (
-                              <>
-                                {r.trend && <p><span className="text-zinc-500">趨勢：</span>{r.trend}</p>}
-                                {r.valuation && <p><span className="text-zinc-500">估值：</span>{r.valuation}</p>}
-                                {r.risk && <p><span className="text-zinc-500">風險：</span>{r.risk}</p>}
-                                {r.summary && <p className="mt-2">{r.summary}</p>}
-                                {r.action && <p><span className="text-zinc-500">建議：</span>{r.action}</p>}
-                              </>
-                            )
-                          })()}
-                        </div>
+                        <AiReportPanel report={aiReportCache[`${selected.symbol}-${selected.market}`]!.report} />
                       ) : (
-                        <p className="text-sm text-zinc-500">可先生成快速摘要，再視需要生成完整報告。</p>
+                        <p className="text-sm text-zinc-500">
+                          付費會員可點「生成 AI 研究報告」取得完整段落與操作細節（非系統摘要的逐字複製）。
+                        </p>
                       )}
                     </div>
                   </div>

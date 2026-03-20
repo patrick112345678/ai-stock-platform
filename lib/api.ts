@@ -101,14 +101,37 @@ export function clearToken() {
   localStorage.removeItem("access_token")
 }
 
-/** 若為 401/403 認證錯誤，清除 token 並回傳 true，呼叫方應導向登入 */
+/** 若為 401 認證錯誤，清除 token 並回傳 true。403（例如未付費）不應登出。 */
 export function handleAuthError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
-  if (msg.includes("401") || msg.includes("403") || msg.includes("Not authenticated") || msg.includes("無法驗證")) {
+  if (msg.includes("403")) return false
+  if (msg.includes("401") || msg.includes("Not authenticated") || msg.includes("無法驗證")) {
     clearToken()
     return true
   }
   return false
+}
+
+export type CurrentUser = {
+  id: number
+  username: string
+  email?: string | null
+  plan_code: string
+  role: string
+  status: string
+  ai_access: boolean
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUser> {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`auth/me 錯誤: ${res.status} ${text}`)
+  }
+  return res.json()
 }
 export async function getWatchlist() {
   const token = getToken()
@@ -315,6 +338,9 @@ export type AIReport = {
   industry?: string
   risk_opportunity?: string
   strategy?: string
+  rating?: { bias?: string; risk_level?: string; medium_term_view?: string }
+  action_detail?: Record<string, string>
+  fundamental_detail?: Record<string, string>
 }
 
 export type AIAnalyzeResponse = {
