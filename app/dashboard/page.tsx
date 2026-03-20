@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ChevronDown,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react"
 import TradingChart from "@/components/TradingChart"
 import { AiReportPanel } from "@/components/AiReportPanel"
+import { AccountSidebarCard, AccountTopBar } from "@/components/DashboardAccount"
 import { formatStockLabel, StockLabel } from "@/components/StockLabel"
 import {
   addWatchlist,
@@ -37,6 +39,7 @@ import {
   searchMarket,
   type AIAnalyzeResponse,
   type AIOpportunityItem,
+  type CurrentUser,
   type DetailData,
   type PeerItem,
   type SearchItem,
@@ -112,6 +115,8 @@ export default function Home() {
   const [checkedAuth, setCheckedAuth] = useState(false)
   /** 後端 /auth/me：付費／admin／AI_UNLIMITED_USERNAMES 為 true */
   const [aiAccess, setAiAccess] = useState(false)
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
   const [scanPool, setScanPool] = useState<"TOP30" | "TOP100" | "TOP800" | "ALL">("TOP30")
   const [symbolInput, setSymbolInput] = useState("AAPL")
@@ -217,6 +222,16 @@ export default function Home() {
     }
   }, [isDraggingRightPanel, isRightPanelCollapsed, isDraggingSidebar, isSidebarCollapsed])
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const u = await fetchCurrentUser()
+      setCurrentUser(u)
+      setAiAccess(!!u.ai_access)
+    } catch {
+      /* 略 */
+    }
+  }, [])
+
   useEffect(() => {
     const token =
       typeof window !== "undefined" ? localStorage.getItem("access_token") : null
@@ -229,6 +244,7 @@ export default function Home() {
     ;(async () => {
       try {
         const u = await fetchCurrentUser()
+        setCurrentUser(u)
         setAiAccess(!!u.ai_access)
       } catch {
         setAiAccess(false)
@@ -757,6 +773,17 @@ export default function Home() {
           </button>
         </div>
 
+        <AccountSidebarCard
+          user={currentUser}
+          collapsed={isSidebarCollapsed}
+          onOpenMenu={() => setAccountMenuOpen(true)}
+          onRefreshUser={refreshUser}
+          onLogout={() => {
+            clearToken()
+            router.push("/login")
+          }}
+        />
+
         {!isSidebarCollapsed && (
           <>
             <div className="mb-4 space-y-2">
@@ -788,6 +815,13 @@ export default function Home() {
                   Crypto
                 </button>
               </div>
+
+              <Link
+                href="/pricing"
+                className="flex w-full items-center justify-center rounded-xl border border-violet-700/60 bg-violet-950/40 px-3 py-2.5 text-sm font-medium text-violet-200 hover:bg-violet-900/50"
+              >
+                付費方案 · Premium
+              </Link>
 
               <div className="relative" ref={searchRef}>
                 <input
@@ -905,7 +939,18 @@ export default function Home() {
         )}
       </div>
 
-      <div className="flex-1 min-w-0 p-6 overflow-auto">
+      <div className="flex flex-1 flex-col min-w-0">
+        <AccountTopBar
+          user={currentUser}
+          menuOpen={accountMenuOpen}
+          onMenuOpenChange={setAccountMenuOpen}
+          onRefreshUser={refreshUser}
+          onLogout={() => {
+            clearToken()
+            router.push("/login")
+          }}
+        />
+        <div className="flex-1 min-w-0 overflow-auto p-6">
         {/* Header & Metadata */}
         <div className="mb-4">
           <h1 className="text-3xl font-bold text-white">
@@ -1229,9 +1274,17 @@ export default function Home() {
                 {!aiPanelCollapsed && (
                 <div className="border-t border-violet-900/60">
                 {!aiAccess && (
-                  <div className="px-5 py-3 text-sm text-amber-200 bg-amber-950/35 border-b border-amber-800/40">
-                    <strong>付費專區：</strong>AI 每日機會、完整研究報告需付費方案（或管理員／總帳號）。
-                    免費會員仍可使用技術選股、排行榜與系統快速結論。
+                  <div className="flex flex-col gap-3 border-b border-amber-800/40 bg-amber-950/35 px-5 py-3 text-sm text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+                    <p>
+                      <strong>付費專區：</strong>
+                      AI 每日機會、完整研究報告需付費方案。免費會員仍可使用技術選股、排行榜與系統快速結論。
+                    </p>
+                    <Link
+                      href="/pricing"
+                      className="shrink-0 rounded-lg border border-amber-500/70 bg-amber-900/40 px-4 py-2 text-center text-sm font-medium text-amber-100 hover:bg-amber-800/50"
+                    >
+                      查看付費方案
+                    </Link>
                   </div>
                 )}
                 <div className="px-5 py-4 flex items-center gap-2 flex-wrap">
@@ -1669,9 +1722,17 @@ export default function Home() {
                     下方「系統快速結論」為規則引擎摘要（免費）；「AI 研究報告」由模型依同一套資料延伸撰寫，兩者定位不同。
                   </p>
                   {!aiAccess && (
-                    <div className="mb-4 rounded-lg border border-amber-800/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
-                      完整 AI 報告與 AI 每日機會需<strong className="text-amber-300">付費會員</strong>。
-                      下方「系統快速結論」為免費技術規則摘要，無需付費。
+                    <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-800/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                      <p>
+                        完整 AI 報告與 AI 每日機會需<strong className="text-amber-300">付費會員</strong>。
+                        下方「系統快速結論」為免費技術規則摘要。
+                      </p>
+                      <Link
+                        href="/pricing"
+                        className="shrink-0 rounded-lg border border-amber-500/60 bg-amber-900/35 px-3 py-2 text-center text-sm font-medium text-amber-100 hover:bg-amber-800/40"
+                      >
+                        付費方案
+                      </Link>
                     </div>
                   )}
 
@@ -1757,6 +1818,7 @@ export default function Home() {
             )}
           </>
         )}
+        </div>
       </div>
 
       <div

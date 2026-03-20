@@ -77,11 +77,18 @@ export default function RegisterPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-sm text-zinc-400">
-          已經有帳號？
-          <a href="/login" className="ml-2 text-white underline">
-            前往登入
-          </a>
+        <div className="mt-6 space-y-3 text-sm text-zinc-400">
+          <div>
+            已經有帳號？
+            <a href="/login" className="ml-2 text-white underline">
+              前往登入
+            </a>
+          </div>
+          <div>
+            <a href="/pricing" className="text-violet-400 underline hover:text-violet-300">
+              查看付費方案（Premium）
+            </a>
+          </div>
         </div>
       </div>
     </div>

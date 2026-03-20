@@ -1,3 +1,5 @@
+import { formatAuthApiError } from "./apiErrors"
+
 // 優先使用同源代理 /api，避免 CORS；若設了 NEXT_PUBLIC_API_BASE_URL 則直連後端
 const API_BASE =
   typeof window !== "undefined"
@@ -39,7 +41,7 @@ export async function registerUser(username: string,email: string,password: stri
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`註冊失敗: ${text}`)
+    throw new Error(formatAuthApiError(text, "register"))
   }
 
   return res.json()
@@ -82,7 +84,7 @@ export async function loginUser(username: string, password: string) {
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`登入失敗: ${text}`)
+    throw new Error(formatAuthApiError(text, "login"))
   }
 
   return res.json()
@@ -120,6 +122,10 @@ export type CurrentUser = {
   role: string
   status: string
   ai_access: boolean
+  /** ISO 字串，付費到期時間（UTC） */
+  plan_expires_at?: string | null
+  membership_days_remaining?: number | null
+  membership_unlimited?: boolean
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser> {
@@ -132,6 +138,33 @@ export async function fetchCurrentUser(): Promise<CurrentUser> {
     throw new Error(`auth/me 錯誤: ${res.status} ${text}`)
   }
   return res.json()
+}
+
+export async function changePassword(current_password: string, new_password: string): Promise<{ ok: boolean; message?: string }> {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/auth/change-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ current_password, new_password }),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    try {
+      const j = JSON.parse(text) as { detail?: string }
+      if (j?.detail === "目前密碼不正確") throw new Error(j.detail)
+    } catch (e) {
+      if (e instanceof Error && e.message === "目前密碼不正確") throw e
+    }
+    throw new Error(text.length < 200 ? `變更密碼失敗：${text}` : "變更密碼失敗，請稍後再試")
+  }
+  try {
+    return JSON.parse(text) as { ok: boolean; message?: string }
+  } catch {
+    return { ok: true }
+  }
 }
 export async function getWatchlist() {
   const token = getToken()

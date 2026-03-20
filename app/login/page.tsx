@@ -72,11 +72,18 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-sm text-zinc-400">
-          還沒有帳號？
-          <a href="/register" className="ml-2 text-white underline">
-            前往註冊
-          </a>
+        <div className="mt-6 space-y-3 text-sm text-zinc-400">
+          <div>
+            還沒有帳號？
+            <a href="/register" className="ml-2 text-white underline">
+              前往註冊
+            </a>
+          </div>
+          <div>
+            <a href="/pricing" className="text-violet-400 underline hover:text-violet-300">
+              付費方案 · 解鎖 AI 功能
+            </a>
+          </div>
         </div>
       </div>
     </div>
