@@ -294,13 +294,27 @@ export async function getChart(
 
   return res.json()
 }
+export type ConfidenceDetail = {
+  overall?: string
+  fundamental?: string
+  technical?: string
+  industry?: string
+}
+
 export type AIReport = {
   trend?: string
   valuation?: string
   risk?: string
   summary?: string
   action?: string
+  action_short?: string
   confidence?: number
+  confidence_detail?: ConfidenceDetail
+  fundamental?: string
+  technical?: Record<string, string> | string
+  industry?: string
+  risk_opportunity?: string
+  strategy?: string
 }
 
 export type AIAnalyzeResponse = {
