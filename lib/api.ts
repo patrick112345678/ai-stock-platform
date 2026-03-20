@@ -1,10 +1,18 @@
 import { formatAuthApiError } from "./apiErrors"
 
-// 優先使用同源代理 /api，避免 CORS；若設了 NEXT_PUBLIC_API_BASE_URL 則直連後端
+/** 公開後端根網址（無結尾 /）。支援兩種常見命名，避免 Render 設成 NEXT_PUBLIC_API_URL 但程式讀 BASE_URL。 */
+function getPublicApiBase(): string | undefined {
+  const base =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "")
+  return base || undefined
+}
+
+// 優先使用同源代理 /api，避免 CORS；若設了 NEXT_PUBLIC_API_BASE_URL 或 NEXT_PUBLIC_API_URL 則直連後端
 const API_BASE =
   typeof window !== "undefined"
-    ? (process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "/api")
-    : (process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000")
+    ? (getPublicApiBase() || "/api")
+    : (getPublicApiBase() || "http://127.0.0.1:8000")
 export type MarketPool = "TW" | "US" | "CRYPTO"
 
 /** 檢查後端是否可連線且路由已載入 */
@@ -41,7 +49,7 @@ export async function registerUser(username: string,email: string,password: stri
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(formatAuthApiError(text, "register"))
+    throw new Error(formatAuthApiError(text, "register", res.status))
   }
 
   return res.json()
@@ -84,7 +92,7 @@ export async function loginUser(username: string, password: string) {
 
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(formatAuthApiError(text, "login"))
+    throw new Error(formatAuthApiError(text, "login", res.status))
   }
 
   return res.json()

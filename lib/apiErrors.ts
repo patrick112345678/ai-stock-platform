@@ -28,7 +28,8 @@ function detailArrayToText(detail: unknown[]): string {
  */
 export function formatAuthApiError(
   raw: string,
-  context: "register" | "login"
+  context: "register" | "login",
+  httpStatus?: number
 ): string {
   const map = context === "register" ? REGISTER_DETAIL_ZH : LOGIN_DETAIL_ZH
   const prefix = context === "register" ? "註冊失敗：" : "登入失敗："
@@ -47,7 +48,10 @@ export function formatAuthApiError(
   } catch {
     /* 非 JSON */
   }
-  if (!trimmed) return `${prefix}請稍後再試。`
+  if (!trimmed) {
+    const code = httpStatus != null ? `（HTTP ${httpStatus}）` : ""
+    return `${prefix}伺服器未回傳說明${code}。若為線上版，請確認前端已設定 NEXT_PUBLIC_API_BASE_URL（或 NEXT_PUBLIC_API_URL）或 BACKEND_API_URL 指向後端，並重新部署；免費主機休眠時請多試一次。`
+  }
   if (trimmed.length < 240 && !trimmed.startsWith("{")) {
     return `${prefix}${trimmed}`
   }
