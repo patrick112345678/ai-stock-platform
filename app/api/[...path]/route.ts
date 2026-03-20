@@ -60,10 +60,15 @@ async function forward(
     return proxyConnectionErrorResponse(e)
   }
   const text = await res.text()
+  // 不可把上游 res.headers 整包丟進 new Response()：含 transfer-encoding、content-length 等
+  // 在 Node/Next 會丟錯 → 客戶端只看到 500 text/plain「Internal Server Error」
+  const outHeaders = new Headers()
+  const ct = res.headers.get("content-type")
+  if (ct) outHeaders.set("Content-Type", ct)
   return new Response(text, {
     status: res.status,
     statusText: res.statusText,
-    headers: res.headers,
+    headers: outHeaders,
   })
 }
 
