@@ -622,3 +622,79 @@ export async function analyzeWatchlistDaily(
 
   return res.json()
 }
+
+// --- 藍新金流 NewebPay ---
+
+export type NewebPayPlansResponse = {
+  gateway_ready: boolean
+  amounts_twd: Record<string, number>
+  plan_days: Record<string, number>
+}
+
+export async function fetchNewebPayPlans(): Promise<NewebPayPlansResponse> {
+  const res = await fetch(`${API_BASE}/payment/newebpay/plans`, { cache: "no-store" })
+  if (!res.ok) {
+    const t = await res.text()
+    throw new Error(t || "無法載入付款方案")
+  }
+  return res.json()
+}
+
+export type NewebPayCheckoutResponse = {
+  gateway_url: string
+  merchant_id: string
+  trade_info: string
+  trade_sha: string
+  version: string
+  merchant_order_no: string
+  amt: number
+}
+
+export async function createNewebPayCheckout(planId: "1m" | "6m" | "12m"): Promise<NewebPayCheckoutResponse> {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/payment/newebpay/checkout`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ plan_id: planId }),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    try {
+      const j = JSON.parse(text) as { detail?: string | string[] }
+      const d = j?.detail
+      const msg = Array.isArray(d)
+        ? d.map((x) => (typeof x === "object" && x && x !== null && "msg" in x ? String((x as { msg: string }).msg) : "")).join("；")
+        : d
+      if (msg) throw new Error(String(msg))
+    } catch (e) {
+      if (e instanceof Error && e.message && !e.message.startsWith("{")) throw e
+    }
+    throw new Error(text.length < 400 ? text : "建立藍新訂單失敗")
+  }
+  return JSON.parse(text) as NewebPayCheckoutResponse
+}
+
+/** 建立隱藏表單 POST 至藍新 MPG（僅能在瀏覽器執行） */
+export function postNewebPayMpgForm(p: NewebPayCheckoutResponse) {
+  if (typeof document === "undefined") return
+  const f = document.createElement("form")
+  f.method = "POST"
+  f.action = p.gateway_url
+  f.acceptCharset = "UTF-8"
+  const add = (name: string, value: string) => {
+    const inp = document.createElement("input")
+    inp.type = "hidden"
+    inp.name = name
+    inp.value = value
+    f.appendChild(inp)
+  }
+  add("MerchantID", p.merchant_id)
+  add("TradeInfo", p.trade_info)
+  add("TradeSha", p.trade_sha)
+  add("Version", p.version)
+  document.body.appendChild(f)
+  f.submit()
+}
