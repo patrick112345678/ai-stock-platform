@@ -18,7 +18,6 @@ import { formatStockLabel, StockLabel } from "@/components/StockLabel"
 import {
   addWatchlist,
   analyzeAI,
-  checkBackendHealth,
   clearToken,
   fetchCurrentUser,
   deleteWatchlist,
@@ -117,9 +116,9 @@ export default function Home() {
   const [aiAccess, setAiAccess] = useState(false)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
-  const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("US")
+  const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("TW")
   const [scanPool, setScanPool] = useState<"TOP30" | "TOP100" | "TOP800" | "ALL">("TOP30")
-  const [symbolInput, setSymbolInput] = useState("AAPL")
+  const [symbolInput, setSymbolInput] = useState("2330")
   const [showChart, setShowChart] = useState(false)
   const [chartInterval, setChartInterval] = useState<"1h" | "4h" | "1d" | "1wk">("1d")
 
@@ -127,8 +126,8 @@ export default function Home() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([])
   const [watchlistOverview, setWatchlistOverview] = useState<{ id: number; symbol: string; market: string; change_percent?: number | null }[]>([])
   const [selected, setSelected] = useState<WatchItem>({
-    symbol: "AAPL",
-    market: "US",
+    symbol: "2330",
+    market: "TW",
   })
 
   const [quote, setQuote] = useState<QuoteData | null>(null)
@@ -187,7 +186,6 @@ export default function Home() {
   const [loadingWatchlistTech, setLoadingWatchlistTech] = useState(false)
   const [aiReportCache, setAiReportCache] = useState<Record<string, { report: any; loading?: boolean }>>({})
 
-  const [backendOk, setBackendOk] = useState<boolean | null>(null)
   const [detailData, setDetailData] = useState<DetailData | null>(null)
   const [peers, setPeers] = useState<PeerItem[]>([])
   const [loadingPeers, setLoadingPeers] = useState(false)
@@ -331,9 +329,12 @@ export default function Home() {
         .catch(() => setWatchlistOverview([]))
 
       if (finalMapped.length > 0) {
-        setSelected(finalMapped[0])
-        setMarketPool(finalMapped[0].market)
-        setSymbolInput(finalMapped[0].symbol)
+        // 預設優先台股，否則用清單第一筆
+        const firstTw = finalMapped.find((w) => w.market === "TW")
+        const pick = firstTw ?? finalMapped[0]
+        setSelected(pick)
+        setMarketPool(pick.market)
+        setSymbolInput(pick.symbol)
       }
     } catch (err) {
       console.error(err)
@@ -479,10 +480,6 @@ export default function Home() {
       setAiReportCache((prev) => ({ ...prev, [key]: { ...prev[key], loading: false } }))
     }
   }
-
-  useEffect(() => {
-    checkBackendHealth().then((r) => setBackendOk(r.ok))
-  }, [])
 
   useEffect(() => {
     if (!checkedAuth) return
@@ -737,17 +734,6 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-black text-white overflow-hidden flex-col">
-      {backendOk === false && (
-        <div className="bg-red-900/90 text-white px-4 py-3 text-center text-sm flex items-center justify-center gap-4 flex-wrap">
-          <span>無法連線後端，搜尋、排行榜、選股器等將無法使用。</span>
-          <span className="font-semibold">請確認：</span>
-          <span>1) 後端已執行於 port 8000；2) 瀏覽器可直接開啟 <a href="http://127.0.0.1:8000/" target="_blank" rel="noopener noreferrer" className="underline">http://127.0.0.1:8000/</a></span>
-          <code className="bg-black/40 px-2 py-1 rounded text-xs">cd stock-platform\backend 然後 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</code>
-          <button onClick={() => checkBackendHealth().then((r) => setBackendOk(r.ok))} className="px-3 py-1 rounded bg-white/20 hover:bg-white/30 text-xs">
-            重試
-          </button>
-        </div>
-      )}
       <div className="flex flex-1 overflow-hidden">
       <div
         className={`p-3 shrink-0 relative transition-all duration-200 z-20 ${
