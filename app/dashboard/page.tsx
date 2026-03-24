@@ -17,6 +17,14 @@ import { AccountSidebarCard, AccountTopBar } from "@/components/DashboardAccount
 import { formatStockLabel, StockLabel } from "@/components/StockLabel"
 import { WatchlistSortableList } from "@/components/WatchlistSortableList"
 import {
+  SkeletonBar,
+  SkeletonChartBlock,
+  SkeletonLines,
+  SkeletonMetricCell,
+  SkeletonPeerTableRows,
+  SkeletonTechCard,
+} from "@/components/Skeleton"
+import {
   addWatchlist,
   analyzeAI,
   clearToken,
@@ -190,6 +198,7 @@ export default function Home() {
   const searchRef = useRef<HTMLDivElement | null>(null)
   /** 切換股票時遞增，避免慢請求回來覆寫較新標的 */
   const stockFetchSeqRef = useRef(0)
+  const peerFetchSeqRef = useRef(0)
   const lastFetchedStockKeyRef = useRef<string | null>(null)
   const lastFetchedChartIntervalRef = useRef<typeof chartInterval>(chartInterval)
 
@@ -583,16 +592,19 @@ export default function Home() {
     return aiData
   }, [aiData, aiKey, selectedStockKey])
 
+  /** 標題永遠與當前選中一致：僅在 detail 已對應本檔標的時才用後端 page_title */
   const headerTitle = useMemo(() => {
-    if (detailForSelection) {
-      return (
-        detailForSelection.page_title ||
-        detailForSelection.name ||
-        optimisticTitle
-      )
+    if (detailKey !== selectedStockKey) return optimisticTitle
+    if (detailData) {
+      return detailData.page_title || detailData.name || optimisticTitle
     }
     return optimisticTitle
-  }, [detailForSelection, optimisticTitle])
+  }, [detailData, detailKey, selectedStockKey, optimisticTitle])
+
+  const isDetailPending = detailKey !== selectedStockKey && detailLoading
+  const isQuotePending = quoteKey !== selectedStockKey && quoteLoading
+  const isHeaderPricePending = isQuotePending || (isDetailPending && !quoteForSelection)
+  const isAiBlockPending = aiLoading && aiKey !== selectedStockKey
 
   useEffect(() => {
     if (!checkedAuth) return
@@ -741,11 +753,21 @@ export default function Home() {
 
   useEffect(() => {
     if (activeTab !== "fundamental" || (selected.market !== "TW" && selected.market !== "US")) return
+    const mySeq = ++peerFetchSeqRef.current
     setLoadingPeers(true)
     getPeers(selected.symbol, selected.market, 6)
-      .then((r) => setPeers(r.peers || []))
-      .catch(() => setPeers([]))
-      .finally(() => setLoadingPeers(false))
+      .then((r) => {
+        if (peerFetchSeqRef.current !== mySeq) return
+        setPeers(r.peers || [])
+      })
+      .catch(() => {
+        if (peerFetchSeqRef.current !== mySeq) return
+        setPeers([])
+      })
+      .finally(() => {
+        if (peerFetchSeqRef.current !== mySeq) return
+        setLoadingPeers(false)
+      })
   }, [activeTab, selected.symbol, selected.market])
 
   useEffect(() => {
@@ -1070,27 +1092,49 @@ export default function Home() {
         <div className="flex-1 min-w-0 overflow-auto p-6">
         {/* Header & Metadata */}
         <div className="mb-4">
-          <h1 className="text-3xl font-bold text-white">
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3 flex-wrap">
             {headerTitle}
-            {(quoteLoading || detailLoading) && detailKey !== selectedStockKey ? (
-              <span className="ml-2 text-base font-normal text-zinc-500">更新中…</span>
+            {isDetailPending ? (
+              <SkeletonBar className="h-7 w-24 inline-block align-middle" aria-hidden />
             ) : null}
           </h1>
-          <div className="mt-1 text-sm text-zinc-400">
-            代號: {detailForSelection?.code ?? detailForSelection?.symbol ?? selected.symbol} | 市場: {detailForSelection?.market || "-"} | 產業: {detailForSelection?.display_industry || detailForSelection?.industry || "-"}
+          <div className="mt-1 text-sm text-zinc-400 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>代號: {detailForSelection?.code ?? detailForSelection?.symbol ?? selected.symbol}</span>
+            <span className="text-zinc-600">|</span>
+            {isDetailPending ? (
+              <>
+                <span>市場:</span>
+                <SkeletonBar className="h-4 w-12 inline-block align-middle" />
+                <span className="text-zinc-600">|</span>
+                <span>產業:</span>
+                <SkeletonBar className="h-4 w-28 inline-block align-middle" />
+              </>
+            ) : (
+              <span>
+                市場: {detailForSelection?.market ?? "—"} | 產業: {detailForSelection?.display_industry || detailForSelection?.industry || "—"}
+              </span>
+            )}
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
-            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              資料品質 {detailForSelection?.data_quality || "-"}
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 inline-flex items-center gap-2 min-h-[1.75rem]">
+              資料品質{" "}
+              {isDetailPending ? <SkeletonBar className="h-3 w-16 inline-block" /> : detailForSelection?.data_quality ?? "—"}
             </span>
-            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              顯示週期 {detailForSelection?.interval || "1d"}
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 inline-flex items-center gap-2 min-h-[1.75rem]">
+              顯示週期{" "}
+              {isDetailPending ? <SkeletonBar className="h-3 w-10 inline-block" /> : detailForSelection?.interval || "1d"}
             </span>
-            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              抓取 period {detailForSelection?.period || "-"}
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 inline-flex items-center gap-2 min-h-[1.75rem]">
+              抓取 period{" "}
+              {isDetailPending ? <SkeletonBar className="h-3 w-14 inline-block" /> : detailForSelection?.period ?? "—"}
             </span>
-            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              型態 {aiForSelection?.quick_summary?.patterns?.[0] || "-"}
+            <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300 inline-flex items-center gap-2 min-h-[1.75rem]">
+              型態{" "}
+              {isAiBlockPending ? (
+                <SkeletonBar className="h-3 w-20 inline-block" />
+              ) : (
+                aiForSelection?.quick_summary?.patterns?.[0] ?? "—"
+              )}
             </span>
           </div>
         </div>
@@ -1098,51 +1142,82 @@ export default function Home() {
         {/* Price & Market Metrics */}
         <div className="flex flex-wrap gap-6 mb-6">
           <div>
-            <div className="text-2xl font-bold">
-              現價 {detailForSelection?.currency || "USD"}{" "}
-              {quoteLoading && quoteKey !== selectedStockKey
-                ? "…"
-                : detailForSelection?.price ?? quoteForSelection?.price ?? "-"}
+            <div className="text-2xl font-bold flex items-baseline gap-2 flex-wrap min-h-[2.25rem]">
+              <span className="text-zinc-500 text-lg">現價</span>
+              {isHeaderPricePending ? (
+                <>
+                  <SkeletonBar className="h-9 w-40" />
+                  <SkeletonBar className="h-7 w-24" />
+                </>
+              ) : (
+                <>
+                  <span>
+                    {detailForSelection?.currency || "USD"}{" "}
+                    {detailForSelection?.price ?? quoteForSelection?.price ?? "—"}
+                  </span>
+                </>
+              )}
             </div>
             <div
-              className={`text-sm mt-1 ${
-                (quoteForSelection?.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"
+              className={`text-sm mt-1 min-h-[1.25rem] ${
+                quoteForSelection
+                  ? (quoteForSelection.change ?? 0) >= 0
+                    ? "text-green-400"
+                    : "text-red-400"
+                  : "text-zinc-500"
               }`}
             >
-              {quoteForSelection
-                ? `${(quoteForSelection.change ?? 0) >= 0 ? "↑" : "↓"} ${quoteForSelection.change} (${(quoteForSelection.change_percent ?? 0).toFixed(2)}%)`
-                : quoteLoading
-                  ? "載入報價中…"
-                  : "—"}
+              {quoteForSelection ? (
+                `${(quoteForSelection.change ?? 0) >= 0 ? "↑" : "↓"} ${quoteForSelection.change} (${(quoteForSelection.change_percent ?? 0).toFixed(2)}%)`
+              ) : isQuotePending ? (
+                <SkeletonBar className="h-4 w-36" />
+              ) : null}
             </div>
           </div>
           <div className="border-l border-zinc-700 pl-6">
             <div className="text-zinc-400 text-sm">52週高 / 低</div>
-            <div className="font-semibold">
-              {detailForSelection?.fifty_two_week_high != null ? detailForSelection.fifty_two_week_high.toFixed(2) : "-"}{" "}
-              /{" "}
-              {detailForSelection?.fifty_two_week_low != null ? detailForSelection.fifty_two_week_low.toFixed(2) : "-"}
+            <div className="font-semibold min-h-[1.5rem]">
+              {isDetailPending ? (
+                <SkeletonBar className="h-5 w-36 mt-1" />
+              ) : (
+                <>
+                  {detailForSelection?.fifty_two_week_high != null ? detailForSelection.fifty_two_week_high.toFixed(2) : "—"} /{" "}
+                  {detailForSelection?.fifty_two_week_low != null ? detailForSelection.fifty_two_week_low.toFixed(2) : "—"}
+                </>
+              )}
             </div>
           </div>
           <div className="border-l border-zinc-700 pl-6">
             <div className="text-zinc-400 text-sm">市值</div>
-            <div className="font-semibold">
-              {detailForSelection?.market_cap != null
-                ? detailForSelection.market_cap >= 1e12
+            <div className="font-semibold min-h-[1.5rem]">
+              {isDetailPending ? (
+                <SkeletonBar className="h-5 w-24 mt-1" />
+              ) : detailForSelection?.market_cap != null ? (
+                detailForSelection.market_cap >= 1e12
                   ? `${(detailForSelection.market_cap / 1e12).toFixed(2)}T`
                   : detailForSelection.market_cap >= 1e9
                   ? `${(detailForSelection.market_cap / 1e9).toFixed(2)}B`
                   : detailForSelection.market_cap >= 1e6
                   ? `${(detailForSelection.market_cap / 1e6).toFixed(2)}M`
                   : detailForSelection.market_cap.toFixed(0)
-                : "-"}
+              ) : (
+                "—"
+              )}
             </div>
           </div>
         </div>
 
-        {aiLoading && !aiForSelection && (
-          <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-400">
-            技術摘要與 AI 快評載入中…
+        {isAiBlockPending && (
+          <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3" role="status" aria-label="AI 分析載入中">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                  <SkeletonBar className="h-3 w-14 mb-2" />
+                  <SkeletonBar className="h-5 w-full" />
+                </div>
+              ))}
+            </div>
+            <SkeletonLines rows={2} />
           </div>
         )}
 
@@ -1249,13 +1324,11 @@ export default function Home() {
                     ))}
                   </div>
                   {chartLoading && chartKey !== selectedStockKey ? (
-                    <div className="h-[520px] flex items-center justify-center text-zinc-400">
-                      K 線資料載入中...
-                    </div>
+                    <SkeletonChartBlock />
                   ) : chartKey === selectedStockKey && chartData.length > 0 ? (
                     <TradingChart data={chartData} />
                   ) : (
-                    <div className="h-[520px] flex items-center justify-center text-zinc-400">
+                    <div className="h-[520px] flex items-center justify-center text-zinc-500 text-sm">
                       沒有 K 線資料
                     </div>
                   )}
@@ -1587,21 +1660,48 @@ export default function Home() {
                     <p className="text-sm text-zinc-400 mb-4">Crypto 無 PE/PB 等傳統基本面，以技術面判讀為主。右側「多時間框架總覽」與「技術訊號總表」為主要參考。</p>
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div><span className="text-zinc-400 text-sm">PE</span><div className="font-semibold">{detailForSelection?.pe != null ? detailForSelection.pe.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">PB</span><div className="font-semibold">{detailForSelection?.pb != null ? detailForSelection.pb.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">EPS</span><div className="font-semibold">{detailForSelection?.eps != null ? detailForSelection.eps.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">ROE</span><div className="font-semibold">{detailForSelection?.roe != null ? `${(detailForSelection.roe * 100).toFixed(2)}%` : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">毛利率</span><div className="font-semibold">{detailForSelection?.gross != null ? `${(detailForSelection.gross * 100).toFixed(2)}%` : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">營收成長</span><div className="font-semibold">{detailForSelection?.revenue != null ? `${(detailForSelection.revenue * 100).toFixed(2)}%` : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">負債比</span><div className="font-semibold">{detailForSelection?.debt != null ? detailForSelection.debt.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">估值評級</span><div className="font-semibold">{aiForSelection?.quick_summary?.valuation || detailForSelection?.valuation || "-"}</div></div>
+                    {isDetailPending ? (
+                      Array.from({ length: 8 }).map((_, i) => <SkeletonMetricCell key={i} />)
+                    ) : (
+                      <>
+                        <div><span className="text-zinc-400 text-sm">PE</span><div className="font-semibold">{detailForSelection?.pe != null ? detailForSelection.pe.toFixed(2) : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">PB</span><div className="font-semibold">{detailForSelection?.pb != null ? detailForSelection.pb.toFixed(2) : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">EPS</span><div className="font-semibold">{detailForSelection?.eps != null ? detailForSelection.eps.toFixed(2) : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">ROE</span><div className="font-semibold">{detailForSelection?.roe != null ? `${(detailForSelection.roe * 100).toFixed(2)}%` : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">毛利率</span><div className="font-semibold">{detailForSelection?.gross != null ? `${(detailForSelection.gross * 100).toFixed(2)}%` : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">營收成長</span><div className="font-semibold">{detailForSelection?.revenue != null ? `${(detailForSelection.revenue * 100).toFixed(2)}%` : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">負債比</span><div className="font-semibold">{detailForSelection?.debt != null ? detailForSelection.debt.toFixed(2) : "—"}</div></div>
+                        <div><span className="text-zinc-400 text-sm">估值評級</span><div className="font-semibold">{aiForSelection?.quick_summary?.valuation || detailForSelection?.valuation || "—"}</div></div>
+                      </>
+                    )}
                   </div>
-                  <div className="mt-3 text-sm text-zinc-400">產業：{detailForSelection?.display_industry || detailForSelection?.industry || "-"}</div>
+                  <div className="mt-3 text-sm text-zinc-400 flex items-center gap-2">
+                    產業：
+                    {isDetailPending ? <SkeletonBar className="h-4 w-40 inline-block" /> : detailForSelection?.display_industry || detailForSelection?.industry || "—"}
+                  </div>
                 </div>
                 <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
                   <h3 className="text-lg font-bold mb-4">自動同業比較</h3>
                   {loadingPeers ? (
-                    <div className="text-zinc-400">載入中...</div>
+                    <div className="overflow-x-auto" role="status" aria-label="同業資料載入中">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-zinc-400 border-b border-zinc-700">
+                            <th className="text-left py-2">標的</th>
+                            <th className="text-right py-2">價格</th>
+                            <th className="text-right py-2">漲跌</th>
+                            <th className="text-right py-2">漲跌幅</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td colSpan={4} className="py-2">
+                              <SkeletonPeerTableRows rows={5} />
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   ) : peers.length === 0 ? (
                     <div className="text-zinc-400">目前無法取得有效同業資料（僅支援台股、美股）</div>
                   ) : (
@@ -1898,10 +1998,14 @@ export default function Home() {
                       <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-4 text-sm leading-6 text-zinc-200">
                         {aiForSelection?.quick_summary?.one_line ? (
                           <p>{aiForSelection.quick_summary.one_line}</p>
+                        ) : aiLoading && aiKey !== selectedStockKey ? (
+                          <div className="space-y-2 py-1" role="status" aria-label="AI 分析中">
+                            <SkeletonBar className="h-4 w-full" />
+                            <SkeletonBar className="h-4 w-[92%]" />
+                            <SkeletonBar className="h-4 w-4/5" />
+                          </div>
                         ) : (
-                          <p className="text-zinc-500">
-                            {aiLoading ? "技術摘要載入中…" : "選定標的後會自動載入技術摘要。"}
-                          </p>
+                          <p className="text-zinc-500">選定標的後會自動載入技術摘要。</p>
                         )}
                         {aiForSelection?.quick_summary?.bullish?.length ? (
                           <div className="mt-2">
@@ -1998,31 +2102,52 @@ export default function Home() {
                 <div className="font-semibold">{selected.market}</div>
               </div>
 
+              {isAiBlockPending ? (
+                <>
+                  <SkeletonTechCard />
+                  <SkeletonTechCard />
+                  <SkeletonTechCard />
+                  <SkeletonTechCard tall />
+                  <div className="bg-zinc-800 rounded-xl p-4">
+                    <SkeletonBar className="h-3 w-24 mb-3" />
+                    <SkeletonLines rows={3} />
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-4">
+                    <SkeletonBar className="h-3 w-28 mb-3" />
+                    <SkeletonLines rows={2} />
+                  </div>
+                  <div className="bg-zinc-800 rounded-xl p-4">
+                    <SkeletonBar className="h-3 w-20 mb-3" />
+                    <SkeletonLines rows={2} />
+                  </div>
+                </>
+              ) : (
+                <>
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
                 <div className="font-semibold">
-                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.trend || "—"}
+                  {aiForSelection?.quick_summary?.trend || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
                 <div className="font-semibold">
-                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.valuation || "—"}
+                  {aiForSelection?.quick_summary?.valuation || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術風險</div>
                 <div className="font-semibold">
-                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.risk || "—"}
+                  {aiForSelection?.quick_summary?.risk || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
                 <div className="text-sm leading-6">
-                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.one_line || "—"}
+                  {aiForSelection?.quick_summary?.one_line || "—"}
                 </div>
               </div>
 
@@ -2070,6 +2195,8 @@ export default function Home() {
                   )}
                 </div>
               </div>
+                </>
+              )}
 
               <div className="bg-zinc-800 rounded-xl p-4">
                 <div className="text-zinc-400 text-sm mb-2">多時間框架總覽（1h / 4h / 1d / 1wk）</div>
@@ -2099,12 +2226,19 @@ export default function Home() {
                     </table>
                   </div>
                 ) : (
-                  <div className="text-sm py-2">
-                    <div className="text-zinc-500">
-                      {mtfLoading && mtfKey !== selectedStockKey ? "載入中…" : "載入中或後端未提供資料。"}
-                    </div>
-                    {mtfError && <div className="text-amber-400 mt-1 text-xs">錯誤：{mtfError}</div>}
-                    <div className="text-zinc-600 text-xs mt-1">請確認後端已啟動且從 stock-platform/backend 執行 uvicorn。</div>
+                  <div className="text-sm py-2 space-y-2">
+                    {mtfLoading && mtfKey !== selectedStockKey ? (
+                      <div className="space-y-2" role="status" aria-label="多週期資料載入中">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <SkeletonBar key={i} className="h-8 w-full" />
+                        ))}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-zinc-500">後端未提供多週期資料。</div>
+                        {mtfError && <div className="text-amber-400 mt-1 text-xs">錯誤：{mtfError}</div>}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -2133,11 +2267,19 @@ export default function Home() {
                     </table>
                   </div>
                 ) : (
-                  <div className="text-sm py-2">
-                    <div className="text-zinc-500">
-                      {sigLoading && sigKey !== selectedStockKey ? "載入中…" : "載入中或後端未提供資料。"}
-                    </div>
-                    {sigError && <div className="text-amber-400 mt-1 text-xs">錯誤：{sigError}</div>}
+                  <div className="text-sm py-2 space-y-2">
+                    {sigLoading && sigKey !== selectedStockKey ? (
+                      <div className="space-y-2" role="status" aria-label="技術訊號載入中">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <SkeletonBar key={i} className="h-10 w-full" />
+                        ))}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-zinc-500">後端未提供訊號表資料。</div>
+                        {sigError && <div className="text-amber-400 mt-1 text-xs">錯誤：{sigError}</div>}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
