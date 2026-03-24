@@ -15,6 +15,7 @@ import TradingChart from "@/components/TradingChart"
 import { AiReportPanel } from "@/components/AiReportPanel"
 import { AccountSidebarCard, AccountTopBar } from "@/components/DashboardAccount"
 import { formatStockLabel, StockLabel } from "@/components/StockLabel"
+import { WatchlistSortableList } from "@/components/WatchlistSortableList"
 import {
   addWatchlist,
   analyzeAI,
@@ -34,6 +35,7 @@ import {
   getSignalTable,
   getWatchlist,
   getWatchlistOverview,
+  reorderWatchlist,
   scanMarket,
   searchMarket,
   type AIAnalyzeResponse,
@@ -142,6 +144,8 @@ export default function Home() {
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const searchRef = useRef<HTMLDivElement | null>(null)
+  /** 切換股票時遞增，避免慢請求回來覆寫較新標的 */
+  const stockFetchSeqRef = useRef(0)
 
   const [techScoreMin, setTechScoreMin] = useState(60)
   const [screenerFilterResult, setScreenerFilterResult] = useState<any[]>([])
@@ -320,6 +324,33 @@ export default function Home() {
     }
   }
 
+  async function handleWatchlistReorder(newPoolItems: WatchItem[]) {
+    const orderedIds = newPoolItems.map((w) => Number(w.id)).filter((n) => Number.isFinite(n))
+    if (orderedIds.length !== newPoolItems.length) {
+      await loadWatchlist()
+      return
+    }
+    setWatchlist((prev) => {
+      let i = 0
+      return prev.map((w) => {
+        if (w.market !== marketPool) return w
+        const next = newPoolItems[i++]
+        return next ?? w
+      })
+    })
+    try {
+      await reorderWatchlist(marketPool, orderedIds)
+    } catch (err) {
+      console.error(err)
+      await loadWatchlist()
+      if (handleAuthError(err)) {
+        router.push("/login?msg=登入已過期，請重新登入")
+        return
+      }
+      alert(err instanceof Error ? err.message : "自選股排序失敗")
+    }
+  }
+
   async function runAiOpportunities(limit = 8, forceRefresh = false) {
     try {
       setLoadingAiOpportunities(true)
@@ -482,6 +513,14 @@ export default function Home() {
   }, [aiMode, checkedAuth, marketPool])
 
   useEffect(() => {
+    if (!checkedAuth) return
+    if (!selected.symbol) return
+
+    const mySeq = ++stockFetchSeqRef.current
+    const sym = selected.symbol
+    const mkt = selected.market
+    const iv = chartInterval
+
     async function fetchData() {
       setLoading(true)
       setError("")
@@ -492,35 +531,44 @@ export default function Home() {
       setMtfError(null)
       setSigError(null)
 
-      const [quoteResult, detailResult] = await Promise.allSettled([
-        getQuote(selected.symbol, selected.market),
-        getDetail(selected.symbol, selected.market),
+      const [
+        quoteResult,
+        detailResult,
+        chartResult,
+        aiResult,
+        mtfResult,
+        sigResult,
+      ] = await Promise.allSettled([
+        getQuote(sym, mkt),
+        getDetail(sym, mkt),
+        getChart(sym, mkt, iv),
+        analyzeAI(sym, mkt),
+        getMultiTimeframe(sym, mkt),
+        getSignalTable(sym, mkt),
       ])
+
+      if (stockFetchSeqRef.current !== mySeq) return
+
       setQuote(quoteResult.status === "fulfilled" ? quoteResult.value : null)
       setDetailData(detailResult.status === "fulfilled" ? detailResult.value : null)
       if (quoteResult.status === "rejected") console.warn("getQuote:", quoteResult.reason?.message)
       if (detailResult.status === "rejected") console.warn("getDetail:", detailResult.reason?.message)
 
-      try {
-        const chartJson = await getChart(selected.symbol, selected.market, chartInterval)
+      if (chartResult.status === "fulfilled") {
+        const chartJson = chartResult.value as { candles?: ChartCandle[] }
         setChartData(Array.isArray(chartJson.candles) ? chartJson.candles : [])
-      } catch (err) {
-        console.error("getChart error:", err)
+      } else {
+        console.error("getChart error:", chartResult.status === "rejected" ? chartResult.reason : "")
         setChartData([])
       }
 
-      try {
-        const aiJson = await analyzeAI(selected.symbol, selected.market)
-        setAiData(aiJson)
-      } catch (err) {
-        console.error("analyzeAI error:", err)
+      if (aiResult.status === "fulfilled") {
+        setAiData(aiResult.value as AIAnalyzeResponse)
+      } else {
+        console.error("analyzeAI error:", aiResult.status === "rejected" ? aiResult.reason : "")
         setAiData(null)
       }
 
-      const [mtfResult, sigResult] = await Promise.allSettled([
-        getMultiTimeframe(selected.symbol, selected.market),
-        getSignalTable(selected.symbol, selected.market),
-      ])
       setMultiTimeframe(mtfResult.status === "fulfilled" && Array.isArray(mtfResult.value) ? mtfResult.value : [])
       setSignalTable(sigResult.status === "fulfilled" && Array.isArray(sigResult.value) ? sigResult.value : [])
       setMtfError(mtfResult.status === "rejected" ? (mtfResult.reason?.message ?? "未知錯誤") : null)
@@ -529,10 +577,7 @@ export default function Home() {
       setLoading(false)
     }
 
-    if (!checkedAuth) return
-    if (selected.symbol) {
-      void fetchData()
-    }
+    void fetchData()
   }, [selected, checkedAuth, chartInterval])
 
   useEffect(() => {
@@ -830,59 +875,22 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mt-3 max-h-[calc(100vh-220px)] overflow-y-auto space-y-1 pr-1">
-              {filteredWatchlist.map((item) => {
-                const active = selected.symbol === item.symbol && selected.market === item.market
-
-                return (
-                  <div
-                    key={`${item.market}-${item.symbol}-${item.id ?? "x"}`}
-                    className={`group rounded-md border px-2 py-2 transition ${
-                      active
-                        ? "bg-zinc-700/80 border-zinc-500"
-                        : "bg-zinc-900 border-transparent hover:bg-zinc-800"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <button
-                        onClick={() => {
-                          setSelected(item)
-                          setSymbolInput(item.symbol)
-                          setMarketPool(item.market)
-                          setShowSearchDropdown(false)
-                        }}
-                        className="flex-1 text-left min-w-0"
-                      >
-                        <div className="text-sm font-semibold leading-5 truncate">
-                          {formatStockLabel(item.symbol, item.name, item.market)}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] text-zinc-400 leading-4 truncate">{item.market}</span>
-                          {(() => {
-                            const ov = watchlistOverview.find((o) => o.id === item.id)
-                            const pct = ov?.change_percent
-                            if (pct == null) return null
-                            const isUp = (pct ?? 0) >= 0
-                            return (
-                              <span className={`text-[11px] font-medium ${isUp ? "text-green-400" : "text-red-400"}`}>
-                                {isUp ? "+" : ""}{Number(pct).toFixed(2)}%
-                              </span>
-                            )
-                          })()}
-                        </div>
-                      </button>
-
-                      <button
-                        onClick={() => handleDeleteWatchlist(item)}
-                        className="text-[11px] text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition shrink-0"
-                        title="移除"
-                      >
-                        刪除
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
+            <div className="mt-3 max-h-[calc(100vh-220px)] overflow-y-auto pr-1">
+              <p className="text-[11px] text-zinc-500 mb-2 px-0.5">拖曳左側 ⋮⋮ 可調整順序</p>
+              <WatchlistSortableList
+                items={filteredWatchlist}
+                selected={selected}
+                formatLabel={(sym, name, mkt) => formatStockLabel(sym, name ?? null, mkt)}
+                watchlistOverview={watchlistOverview}
+                onSelectItem={(item) => {
+                  setSelected(item)
+                  setSymbolInput(item.symbol)
+                  setMarketPool(item.market)
+                  setShowSearchDropdown(false)
+                }}
+                onDeleteItem={(item) => void handleDeleteWatchlist(item)}
+                onReorder={handleWatchlistReorder}
+              />
             </div>
           </>
         )}
@@ -904,10 +912,10 @@ export default function Home() {
         {/* Header & Metadata */}
         <div className="mb-4">
           <h1 className="text-3xl font-bold text-white">
-            {detailData?.name || quote?.name || "Loading..."}
+            {detailData?.page_title || detailData?.name || quote?.name || "Loading..."}
           </h1>
           <div className="mt-1 text-sm text-zinc-400">
-            代號: {detailData?.raw_symbol || selected.symbol} | 市場: {detailData?.market || "-"} | 產業: {detailData?.display_industry || detailData?.industry || "-"}
+            代號: {detailData?.code ?? detailData?.symbol ?? selected.symbol} | 市場: {detailData?.market || "-"} | 產業: {detailData?.display_industry || detailData?.industry || "-"}
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
@@ -1797,7 +1805,7 @@ export default function Home() {
             <div className="space-y-4">
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">Symbol</div>
-                <div className="font-semibold">{selected.symbol}</div>
+                <div className="font-semibold">{detailData?.code ?? detailData?.symbol ?? selected.symbol}</div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
@@ -1807,22 +1815,30 @@ export default function Home() {
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
-                <div className="font-semibold">{aiData?.quick_summary?.trend || "Loading..."}</div>
+                <div className="font-semibold">
+                  {loading ? "…" : aiData?.quick_summary?.trend || "—"}
+                </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
-                <div className="font-semibold">{aiData?.quick_summary?.valuation || "Loading..."}</div>
+                <div className="font-semibold">
+                  {loading ? "…" : aiData?.quick_summary?.valuation || "—"}
+                </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術風險</div>
-                <div className="font-semibold">{aiData?.quick_summary?.risk || "Loading..."}</div>
+                <div className="font-semibold">
+                  {loading ? "…" : aiData?.quick_summary?.risk || "—"}
+                </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
-                <div className="text-sm leading-6">{aiData?.quick_summary?.one_line || "Loading..."}</div>
+                <div className="text-sm leading-6">
+                  {loading ? "…" : aiData?.quick_summary?.one_line || "—"}
+                </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4">

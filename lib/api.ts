@@ -222,6 +222,23 @@ export async function addWatchlist(symbol: string, market: MarketPool) {
   return res.json()
 }
 
+export async function reorderWatchlist(market: MarketPool, orderedIds: number[]) {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/watchlist/reorder`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ market, ordered_ids: orderedIds }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`自選股排序失敗: ${text}`)
+  }
+  return res.json()
+}
+
 export async function deleteWatchlist(id: number | string) {
   const token = getToken()
 
@@ -255,6 +272,10 @@ export async function getQuote(symbol: string, market: MarketPool) {
 
 export type DetailData = {
   symbol: string
+  /** 台股純代號，與 title 並列顯示用 */
+  code?: string | null
+  /** 後端組好的頁面標題，例如「台積電（2330）」 */
+  page_title?: string | null
   raw_symbol: string
   name: string | null
   market: string
