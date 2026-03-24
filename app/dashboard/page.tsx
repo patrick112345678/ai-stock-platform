@@ -69,6 +69,10 @@ type WatchItem = {
   name?: string | null
 }
 
+/** 左／右側欄固定寬度（已移除拖曳調整） */
+const SIDEBAR_WIDTH_PX = 260
+const RIGHT_PANEL_WIDTH_PX = 420
+
 function normalizeWatchlistSymbol(symbol: string, market: WatchItem["market"]) {
   const s = String(symbol ?? "")
     .trim()
@@ -122,7 +126,6 @@ export default function Home() {
   const [showChart, setShowChart] = useState(false)
   const [chartInterval, setChartInterval] = useState<"1h" | "4h" | "1d" | "1wk">("1d")
 
-  const [sidebarWidth, setSidebarWidth] = useState(260)
   const [watchlist, setWatchlist] = useState<WatchItem[]>([])
   const [watchlistOverview, setWatchlistOverview] = useState<{ id: number; symbol: string; market: string; change_percent?: number | null }[]>([])
   const [selected, setSelected] = useState<WatchItem>({
@@ -169,13 +172,10 @@ export default function Home() {
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(true)
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false)
 
   const [aiMode, setAiMode] = useState<"daily" | "watchlist">("daily")
 
-  const [rightPanelWidth, setRightPanelWidth] = useState(420)
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false)
-  const [isDraggingRightPanel, setIsDraggingRightPanel] = useState(false)
 
   const [aiData, setAiData] = useState<AIAnalyzeResponse | null>(null)
   const [multiTimeframe, setMultiTimeframe] = useState<any[]>([])
@@ -192,33 +192,6 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<
     "overview" | "fundamental" | "ranking" | "screener" | "ai" | "crypto" | "debug"
   >("overview")
-
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      if (isDraggingRightPanel && !isRightPanelCollapsed) {
-        const nextWidth = Math.max(280, Math.min(720, window.innerWidth - e.clientX))
-        setRightPanelWidth(nextWidth)
-      }
-
-      if (isDraggingSidebar && !isSidebarCollapsed) {
-        const nextWidth = Math.max(220, Math.min(420, e.clientX))
-        setSidebarWidth(nextWidth)
-      }
-    }
-
-    function onMouseUp() {
-      setIsDraggingRightPanel(false)
-      setIsDraggingSidebar(false)
-    }
-
-    window.addEventListener("mousemove", onMouseMove)
-    window.addEventListener("mouseup", onMouseUp)
-
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove)
-      window.removeEventListener("mouseup", onMouseUp)
-    }
-  }, [isDraggingRightPanel, isRightPanelCollapsed, isDraggingSidebar, isSidebarCollapsed])
 
   const refreshUser = useCallback(async () => {
     try {
@@ -737,11 +710,9 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden">
       <div
         className={`p-3 shrink-0 relative transition-all duration-200 z-20 ${
-          isSidebarCollapsed
-            ? "bg-black border-r border-transparent"
-            : "bg-zinc-900 border-r border-zinc-800"
+          isSidebarCollapsed ? "bg-black" : "bg-zinc-900"
         }`}
-        style={{ width: isSidebarCollapsed ? 64 : sidebarWidth }}
+        style={{ width: isSidebarCollapsed ? 64 : SIDEBAR_WIDTH_PX }}
       >
         <div
           className={`mb-4 flex items-center ${
@@ -916,13 +887,6 @@ export default function Home() {
           </>
         )}
 
-        {!isSidebarCollapsed && (
-          <div
-            onMouseDown={() => setIsDraggingSidebar(true)}
-            className="absolute top-0 right-0 h-full w-2 cursor-col-resize border-r border-zinc-700 hover:border-zinc-500 hover:bg-zinc-600/30 z-10"
-            title="拖曳調整左側欄寬度"
-          />
-        )}
       </div>
 
       <div className="flex flex-1 flex-col min-w-0">
@@ -1809,11 +1773,9 @@ export default function Home() {
 
       <div
         className={`relative shrink-0 transition-all duration-200 z-20 ${
-          isRightPanelCollapsed
-            ? "bg-black border-l border-transparent"
-            : "bg-zinc-900 border-l border-zinc-800"
+          isRightPanelCollapsed ? "bg-black" : "bg-zinc-900"
         }`}
-        style={{ width: isRightPanelCollapsed ? 64 : rightPanelWidth }}
+        style={{ width: isRightPanelCollapsed ? 64 : RIGHT_PANEL_WIDTH_PX }}
       >
         <div
           className={`flex items-center ${isRightPanelCollapsed ? "justify-center pt-4" : "mb-4 justify-between gap-2"}`}
@@ -1986,11 +1948,6 @@ export default function Home() {
               </button>
             </div>
 
-            <div
-              onMouseDown={() => setIsDraggingRightPanel(true)}
-              className="absolute top-0 left-0 h-full w-2 cursor-col-resize border-l border-zinc-700 hover:border-zinc-500 hover:bg-zinc-600/30 active:bg-zinc-500/50 z-10"
-              title="拖曳調整右側欄寬度"
-            />
           </div>
         )}
       </div>
