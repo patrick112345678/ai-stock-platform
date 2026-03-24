@@ -75,6 +75,38 @@ type WatchItem = {
 const SIDEBAR_WIDTH_PX = 260
 const RIGHT_PANEL_WIDTH_PX = 420
 
+/** 短時間內重複切回同一標的時共用同一 Promise／快取結果，減少重複請求 */
+const STOCK_API_CACHE_TTL_MS = 45_000
+
+function createDedupedStockFetch() {
+  const inflight = new Map<string, Promise<unknown>>()
+  const cache = new Map<string, { at: number; value: unknown }>()
+  return function dedupe<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+    const now = Date.now()
+    const hit = cache.get(key)
+    if (hit && now - hit.at < STOCK_API_CACHE_TTL_MS) {
+      return Promise.resolve(hit.value as T)
+    }
+    let p = inflight.get(key) as Promise<T> | undefined
+    if (!p) {
+      p = fetcher()
+        .then((v) => {
+          cache.set(key, { at: Date.now(), value: v })
+          inflight.delete(key)
+          return v
+        })
+        .catch((e) => {
+          inflight.delete(key)
+          throw e
+        })
+      inflight.set(key, p)
+    }
+    return p
+  }
+}
+
+const stockFetchDedupe = createDedupedStockFetch()
+
 function normalizeWatchlistSymbol(symbol: string, market: WatchItem["market"]) {
   const s = String(symbol ?? "")
     .trim()
@@ -137,7 +169,19 @@ export default function Home() {
 
   const [quote, setQuote] = useState<QuoteData | null>(null)
   const [chartData, setChartData] = useState<ChartCandle[]>([])
-  const [loading, setLoading] = useState(false)
+  const [quoteLoading, setQuoteLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [chartLoading, setChartLoading] = useState(false)
+  const [mtfLoading, setMtfLoading] = useState(false)
+  const [sigLoading, setSigLoading] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  /** 各區資料對應的 `${symbol}-${market}`，用於避免切換標的時短暫顯示上一檔資料 */
+  const [quoteKey, setQuoteKey] = useState<string | null>(null)
+  const [detailKey, setDetailKey] = useState<string | null>(null)
+  const [chartKey, setChartKey] = useState<string | null>(null)
+  const [mtfKey, setMtfKey] = useState<string | null>(null)
+  const [sigKey, setSigKey] = useState<string | null>(null)
+  const [aiKey, setAiKey] = useState<string | null>(null)
   const [error, setError] = useState("")
 
   const [searchResults, setSearchResults] = useState<SearchItem[]>([])
@@ -146,6 +190,8 @@ export default function Home() {
   const searchRef = useRef<HTMLDivElement | null>(null)
   /** 切換股票時遞增，避免慢請求回來覆寫較新標的 */
   const stockFetchSeqRef = useRef(0)
+  const lastFetchedStockKeyRef = useRef<string | null>(null)
+  const lastFetchedChartIntervalRef = useRef<typeof chartInterval>(chartInterval)
 
   const [techScoreMin, setTechScoreMin] = useState(60)
   const [screenerFilterResult, setScreenerFilterResult] = useState<any[]>([])
@@ -512,6 +558,42 @@ export default function Home() {
     }
   }, [aiMode, checkedAuth, marketPool])
 
+  const selectedStockKey = useMemo(
+    () => `${selected.symbol}-${selected.market}`,
+    [selected.symbol, selected.market]
+  )
+
+  const optimisticTitle = useMemo(() => {
+    const w = watchlist.find((x) => x.symbol === selected.symbol && x.market === selected.market)
+    return formatStockLabel(selected.symbol, w?.name ?? null, selected.market)
+  }, [watchlist, selected.symbol, selected.market])
+
+  const detailForSelection = useMemo(() => {
+    if (detailKey !== selectedStockKey) return null
+    return detailData
+  }, [detailData, detailKey, selectedStockKey])
+
+  const quoteForSelection = useMemo(() => {
+    if (quoteKey !== selectedStockKey) return null
+    return quote
+  }, [quote, quoteKey, selectedStockKey])
+
+  const aiForSelection = useMemo(() => {
+    if (aiKey !== selectedStockKey) return null
+    return aiData
+  }, [aiData, aiKey, selectedStockKey])
+
+  const headerTitle = useMemo(() => {
+    if (detailForSelection) {
+      return (
+        detailForSelection.page_title ||
+        detailForSelection.name ||
+        optimisticTitle
+      )
+    }
+    return optimisticTitle
+  }, [detailForSelection, optimisticTitle])
+
   useEffect(() => {
     if (!checkedAuth) return
     if (!selected.symbol) return
@@ -520,65 +602,142 @@ export default function Home() {
     const sym = selected.symbol
     const mkt = selected.market
     const iv = chartInterval
+    const key = `${sym}-${mkt}`
 
-    async function fetchData() {
-      setLoading(true)
+    const stockChanged = lastFetchedStockKeyRef.current !== key
+    const intervalOnly =
+      !stockChanged && lastFetchedChartIntervalRef.current !== iv
+
+    const runLayer1QuoteDetail = () => {
       setError("")
-      setAiData(null)
-      setMultiTimeframe([])
-      setSignalTable([])
-      setDetailData(null)
+      setQuoteLoading(true)
+      setDetailLoading(true)
+
+      void Promise.allSettled([
+        stockFetchDedupe(`quote:${key}`, () => getQuote(sym, mkt)),
+        stockFetchDedupe(`detail:${key}`, () => getDetail(sym, mkt)),
+      ])
+        .then((results) => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          const [qr, dr] = results
+          if (qr.status === "fulfilled") {
+            setQuote(qr.value as QuoteData)
+            setQuoteKey(key)
+          } else {
+            console.warn("getQuote:", qr.reason)
+            setQuoteKey(null)
+          }
+          if (dr.status === "fulfilled") {
+            setDetailData(dr.value as DetailData)
+            setDetailKey(key)
+          } else {
+            console.warn("getDetail:", dr.reason)
+            setDetailKey(null)
+          }
+        })
+        .finally(() => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          setQuoteLoading(false)
+          setDetailLoading(false)
+        })
+    }
+
+    const runLayer2ChartMtfSig = () => {
+      setChartLoading(true)
+      setMtfLoading(true)
+      setSigLoading(true)
       setMtfError(null)
       setSigError(null)
 
-      const [
-        quoteResult,
-        detailResult,
-        chartResult,
-        aiResult,
-        mtfResult,
-        sigResult,
-      ] = await Promise.allSettled([
-        getQuote(sym, mkt),
-        getDetail(sym, mkt),
-        getChart(sym, mkt, iv),
-        analyzeAI(sym, mkt),
-        getMultiTimeframe(sym, mkt),
-        getSignalTable(sym, mkt),
+      void Promise.allSettled([
+        stockFetchDedupe(`chart:${key}:${iv}`, () => getChart(sym, mkt, iv)),
+        stockFetchDedupe(`mtf:${key}`, () => getMultiTimeframe(sym, mkt)),
+        stockFetchDedupe(`sig:${key}`, () => getSignalTable(sym, mkt)),
       ])
+        .then((results) => {
+          if (stockFetchSeqRef.current !== mySeq) return
 
-      if (stockFetchSeqRef.current !== mySeq) return
+          const [chartResult, mtfResult, sigResult] = results
 
-      setQuote(quoteResult.status === "fulfilled" ? quoteResult.value : null)
-      setDetailData(detailResult.status === "fulfilled" ? detailResult.value : null)
-      if (quoteResult.status === "rejected") console.warn("getQuote:", quoteResult.reason?.message)
-      if (detailResult.status === "rejected") console.warn("getDetail:", detailResult.reason?.message)
+          if (chartResult.status === "fulfilled") {
+            const chartJson = chartResult.value as { candles?: ChartCandle[] }
+            setChartData(Array.isArray(chartJson.candles) ? chartJson.candles : [])
+            setChartKey(key)
+          } else {
+            console.error("getChart error:", chartResult.status === "rejected" ? chartResult.reason : "")
+            setChartData([])
+            setChartKey(null)
+          }
 
-      if (chartResult.status === "fulfilled") {
-        const chartJson = chartResult.value as { candles?: ChartCandle[] }
-        setChartData(Array.isArray(chartJson.candles) ? chartJson.candles : [])
-      } else {
-        console.error("getChart error:", chartResult.status === "rejected" ? chartResult.reason : "")
-        setChartData([])
-      }
+          setMultiTimeframe(
+            mtfResult.status === "fulfilled" && Array.isArray(mtfResult.value) ? mtfResult.value : []
+          )
+          setMtfKey(mtfResult.status === "fulfilled" ? key : null)
+          setMtfError(mtfResult.status === "rejected" ? (mtfResult.reason?.message ?? "未知錯誤") : null)
 
-      if (aiResult.status === "fulfilled") {
-        setAiData(aiResult.value as AIAnalyzeResponse)
-      } else {
-        console.error("analyzeAI error:", aiResult.status === "rejected" ? aiResult.reason : "")
-        setAiData(null)
-      }
-
-      setMultiTimeframe(mtfResult.status === "fulfilled" && Array.isArray(mtfResult.value) ? mtfResult.value : [])
-      setSignalTable(sigResult.status === "fulfilled" && Array.isArray(sigResult.value) ? sigResult.value : [])
-      setMtfError(mtfResult.status === "rejected" ? (mtfResult.reason?.message ?? "未知錯誤") : null)
-      setSigError(sigResult.status === "rejected" ? (sigResult.reason?.message ?? "未知錯誤") : null)
-
-      setLoading(false)
+          setSignalTable(
+            sigResult.status === "fulfilled" && Array.isArray(sigResult.value) ? sigResult.value : []
+          )
+          setSigKey(sigResult.status === "fulfilled" ? key : null)
+          setSigError(sigResult.status === "rejected" ? (sigResult.reason?.message ?? "未知錯誤") : null)
+        })
+        .finally(() => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          setChartLoading(false)
+          setMtfLoading(false)
+          setSigLoading(false)
+        })
     }
 
-    void fetchData()
-  }, [selected, checkedAuth, chartInterval])
+    const runLayer3Ai = () => {
+      setAiLoading(true)
+      stockFetchDedupe(`ai:${key}`, () => analyzeAI(sym, mkt))
+        .then((res) => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          setAiData(res as AIAnalyzeResponse)
+          setAiKey(key)
+        })
+        .catch((e) => {
+          console.error("analyzeAI error:", e)
+        })
+        .finally(() => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          setAiLoading(false)
+        })
+    }
+
+    if (intervalOnly) {
+      lastFetchedChartIntervalRef.current = iv
+      setChartLoading(true)
+      setMtfError(null)
+      setSigError(null)
+      stockFetchDedupe(`chart:${key}:${iv}`, () => getChart(sym, mkt, iv))
+        .then((chartJson) => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          const j = chartJson as { candles?: ChartCandle[] }
+          setChartData(Array.isArray(j.candles) ? j.candles : [])
+          setChartKey(key)
+        })
+        .catch((e) => {
+          console.error("getChart error:", e)
+          if (stockFetchSeqRef.current !== mySeq) return
+          setChartData([])
+        })
+        .finally(() => {
+          if (stockFetchSeqRef.current !== mySeq) return
+          setChartLoading(false)
+        })
+      return
+    }
+
+    lastFetchedStockKeyRef.current = key
+    lastFetchedChartIntervalRef.current = iv
+
+    runLayer1QuoteDetail()
+    runLayer2ChartMtfSig()
+    // 第三層延後到下一個 macrotask，讓 quote/detail 與背景 layer2 先進入佇列，避免與首屏競爭
+    window.setTimeout(() => runLayer3Ai(), 0)
+  }, [selected.symbol, selected.market, chartInterval, checkedAuth])
 
   useEffect(() => {
     if (activeTab !== "fundamental" || (selected.market !== "TW" && selected.market !== "US")) return
@@ -912,23 +1071,26 @@ export default function Home() {
         {/* Header & Metadata */}
         <div className="mb-4">
           <h1 className="text-3xl font-bold text-white">
-            {detailData?.page_title || detailData?.name || quote?.name || "Loading..."}
+            {headerTitle}
+            {(quoteLoading || detailLoading) && detailKey !== selectedStockKey ? (
+              <span className="ml-2 text-base font-normal text-zinc-500">更新中…</span>
+            ) : null}
           </h1>
           <div className="mt-1 text-sm text-zinc-400">
-            代號: {detailData?.code ?? detailData?.symbol ?? selected.symbol} | 市場: {detailData?.market || "-"} | 產業: {detailData?.display_industry || detailData?.industry || "-"}
+            代號: {detailForSelection?.code ?? detailForSelection?.symbol ?? selected.symbol} | 市場: {detailForSelection?.market || "-"} | 產業: {detailForSelection?.display_industry || detailForSelection?.industry || "-"}
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              資料品質 {detailData?.data_quality || "-"}
+              資料品質 {detailForSelection?.data_quality || "-"}
             </span>
             <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              顯示週期 {detailData?.interval || "1d"}
+              顯示週期 {detailForSelection?.interval || "1d"}
             </span>
             <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              抓取 period {detailData?.period || "-"}
+              抓取 period {detailForSelection?.period || "-"}
             </span>
             <span className="px-2 py-1 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-300">
-              型態 {aiData?.quick_summary?.patterns?.[0] || "-"}
+              型態 {aiForSelection?.quick_summary?.patterns?.[0] || "-"}
             </span>
           </div>
         </div>
@@ -936,67 +1098,88 @@ export default function Home() {
         {/* Price & Market Metrics */}
         <div className="flex flex-wrap gap-6 mb-6">
           <div>
-            <div className="text-2xl font-bold">現價 {detailData?.currency || "USD"} {detailData?.price ?? quote?.price ?? "-"}</div>
-            <div className={`text-sm mt-1 ${(quote?.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
-              {(quote?.change ?? 0) >= 0 ? "↑" : "↓"} {quote?.change ?? "-"} ({(quote?.change_percent ?? 0).toFixed(2)}%)
+            <div className="text-2xl font-bold">
+              現價 {detailForSelection?.currency || "USD"}{" "}
+              {quoteLoading && quoteKey !== selectedStockKey
+                ? "…"
+                : detailForSelection?.price ?? quoteForSelection?.price ?? "-"}
+            </div>
+            <div
+              className={`text-sm mt-1 ${
+                (quoteForSelection?.change ?? 0) >= 0 ? "text-green-400" : "text-red-400"
+              }`}
+            >
+              {quoteForSelection
+                ? `${(quoteForSelection.change ?? 0) >= 0 ? "↑" : "↓"} ${quoteForSelection.change} (${(quoteForSelection.change_percent ?? 0).toFixed(2)}%)`
+                : quoteLoading
+                  ? "載入報價中…"
+                  : "—"}
             </div>
           </div>
           <div className="border-l border-zinc-700 pl-6">
             <div className="text-zinc-400 text-sm">52週高 / 低</div>
             <div className="font-semibold">
-              {detailData?.fifty_two_week_high != null ? detailData.fifty_two_week_high.toFixed(2) : "-"} / {detailData?.fifty_two_week_low != null ? detailData.fifty_two_week_low.toFixed(2) : "-"}
+              {detailForSelection?.fifty_two_week_high != null ? detailForSelection.fifty_two_week_high.toFixed(2) : "-"}{" "}
+              /{" "}
+              {detailForSelection?.fifty_two_week_low != null ? detailForSelection.fifty_two_week_low.toFixed(2) : "-"}
             </div>
           </div>
           <div className="border-l border-zinc-700 pl-6">
             <div className="text-zinc-400 text-sm">市值</div>
             <div className="font-semibold">
-              {detailData?.market_cap != null
-                ? detailData.market_cap >= 1e12
-                  ? `${(detailData.market_cap / 1e12).toFixed(2)}T`
-                  : detailData.market_cap >= 1e9
-                  ? `${(detailData.market_cap / 1e9).toFixed(2)}B`
-                  : detailData.market_cap >= 1e6
-                  ? `${(detailData.market_cap / 1e6).toFixed(2)}M`
-                  : detailData.market_cap.toFixed(0)
+              {detailForSelection?.market_cap != null
+                ? detailForSelection.market_cap >= 1e12
+                  ? `${(detailForSelection.market_cap / 1e12).toFixed(2)}T`
+                  : detailForSelection.market_cap >= 1e9
+                  ? `${(detailForSelection.market_cap / 1e9).toFixed(2)}B`
+                  : detailForSelection.market_cap >= 1e6
+                  ? `${(detailForSelection.market_cap / 1e6).toFixed(2)}M`
+                  : detailForSelection.market_cap.toFixed(0)
                 : "-"}
             </div>
           </div>
         </div>
 
+        {aiLoading && !aiForSelection && (
+          <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-400">
+            技術摘要與 AI 快評載入中…
+          </div>
+        )}
+
         {/* Technical & Fundamental Summary */}
-        {aiData?.quick_summary && (
+        {aiForSelection?.quick_summary && (
           <div className="mb-6 flex flex-col gap-3">
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
                 <div className="text-zinc-400 text-xs">整體趨勢</div>
-                <div className="font-semibold">{aiData.quick_summary.trend || "-"}</div>
+                <div className="font-semibold">{aiForSelection.quick_summary.trend || "-"}</div>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
                 <div className="text-zinc-400 text-xs">估值評級</div>
-                <div className="font-semibold">{aiData.quick_summary.valuation || "-"}</div>
+                <div className="font-semibold">{aiForSelection.quick_summary.valuation || "-"}</div>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
                 <div className="text-zinc-400 text-xs">風險等級</div>
-                <div className="font-semibold">{aiData.quick_summary.risk || "-"}</div>
+                <div className="font-semibold">{aiForSelection.quick_summary.risk || "-"}</div>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
                 <div className="text-zinc-400 text-xs">多方訊號</div>
-                <div className="font-semibold">{aiData.quick_summary.bullish?.length ? "有" : "0.0%"}</div>
+                <div className="font-semibold">{aiForSelection.quick_summary.bullish?.length ? "有" : "0.0%"}</div>
               </div>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
                 <div className="text-zinc-400 text-xs">空方訊號</div>
-                <div className="font-semibold">{aiData.quick_summary.bearish?.length ? "有" : "0.0%"}</div>
+                <div className="font-semibold">{aiForSelection.quick_summary.bearish?.length ? "有" : "0.0%"}</div>
               </div>
             </div>
             <div className="bg-blue-950/20 border border-blue-800/50 rounded-xl p-4 text-sm text-blue-100">
-              {aiData.quick_summary.one_line || "-"}
+              {aiForSelection.quick_summary.one_line || "-"}
             </div>
             {(() => {
-              const q = aiData.quick_summary
+              const q = aiForSelection.quick_summary
               const patterns = (q.patterns ?? []).slice(0, 2).join(" / ") || "暫無明確型態"
               const bullish = (q.bullish ?? []).slice(0, 2).join(" ； ") || "資料不足"
               const bearish = (q.bearish ?? []).slice(0, 2).join(" ； ") || "資料不足"
-              const aiBrief = `AI快評：${detailData?.name || selected.symbol}目前偏向${q.trend || "-"}，型態重點為${patterns}。主要優勢：${bullish}。主要風險：${bearish}。`
+              const aiBrief = `AI快評：${detailForSelection?.name || selected.symbol}目前偏向${q.trend || "-"}，型態重點為${patterns}。主要優勢：${bullish}。主要風險：${bearish}。`
               return (
                 <div className="mt-4 bg-violet-950/20 border border-violet-800/50 rounded-xl p-4 text-sm text-violet-100">
                   {aiBrief}
@@ -1033,7 +1216,7 @@ export default function Home() {
           <div className="text-red-400 text-lg">{error}</div>
         ) : (
           <>
-            {activeTab === "overview" && quote && (
+            {activeTab === "overview" && (
             <>
             <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-lg mb-6 overflow-hidden">
               <button
@@ -1065,11 +1248,11 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                  {loading && chartData.length === 0 ? (
+                  {chartLoading && chartKey !== selectedStockKey ? (
                     <div className="h-[520px] flex items-center justify-center text-zinc-400">
                       K 線資料載入中...
                     </div>
-                  ) : chartData.length > 0 ? (
+                  ) : chartKey === selectedStockKey && chartData.length > 0 ? (
                     <TradingChart data={chartData} />
                   ) : (
                     <div className="h-[520px] flex items-center justify-center text-zinc-400">
@@ -1404,16 +1587,16 @@ export default function Home() {
                     <p className="text-sm text-zinc-400 mb-4">Crypto 無 PE/PB 等傳統基本面，以技術面判讀為主。右側「多時間框架總覽」與「技術訊號總表」為主要參考。</p>
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div><span className="text-zinc-400 text-sm">PE</span><div className="font-semibold">{detailData?.pe != null ? detailData.pe.toFixed(2) : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">PB</span><div className="font-semibold">{detailData?.pb != null ? detailData.pb.toFixed(2) : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">EPS</span><div className="font-semibold">{detailData?.eps != null ? detailData.eps.toFixed(2) : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">ROE</span><div className="font-semibold">{detailData?.roe != null ? `${(detailData.roe * 100).toFixed(2)}%` : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">毛利率</span><div className="font-semibold">{detailData?.gross != null ? `${(detailData.gross * 100).toFixed(2)}%` : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">營收成長</span><div className="font-semibold">{detailData?.revenue != null ? `${(detailData.revenue * 100).toFixed(2)}%` : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">負債比</span><div className="font-semibold">{detailData?.debt != null ? detailData.debt.toFixed(2) : "-"}</div></div>
-                    <div><span className="text-zinc-400 text-sm">估值評級</span><div className="font-semibold">{aiData?.quick_summary?.valuation || detailData?.valuation || "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">PE</span><div className="font-semibold">{detailForSelection?.pe != null ? detailForSelection.pe.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">PB</span><div className="font-semibold">{detailForSelection?.pb != null ? detailForSelection.pb.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">EPS</span><div className="font-semibold">{detailForSelection?.eps != null ? detailForSelection.eps.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">ROE</span><div className="font-semibold">{detailForSelection?.roe != null ? `${(detailForSelection.roe * 100).toFixed(2)}%` : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">毛利率</span><div className="font-semibold">{detailForSelection?.gross != null ? `${(detailForSelection.gross * 100).toFixed(2)}%` : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">營收成長</span><div className="font-semibold">{detailForSelection?.revenue != null ? `${(detailForSelection.revenue * 100).toFixed(2)}%` : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">負債比</span><div className="font-semibold">{detailForSelection?.debt != null ? detailForSelection.debt.toFixed(2) : detailLoading && detailKey !== selectedStockKey ? "…" : "-"}</div></div>
+                    <div><span className="text-zinc-400 text-sm">估值評級</span><div className="font-semibold">{aiForSelection?.quick_summary?.valuation || detailForSelection?.valuation || "-"}</div></div>
                   </div>
-                  <div className="mt-3 text-sm text-zinc-400">產業：{detailData?.display_industry || detailData?.industry || "-"}</div>
+                  <div className="mt-3 text-sm text-zinc-400">產業：{detailForSelection?.display_industry || detailForSelection?.industry || "-"}</div>
                 </div>
                 <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
                   <h3 className="text-lg font-bold mb-4">自動同業比較</h3>
@@ -1713,21 +1896,23 @@ export default function Home() {
                     <div>
                       <h4 className="mb-2 text-sm font-semibold text-zinc-300">系統快速結論（規則摘要）</h4>
                       <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-4 text-sm leading-6 text-zinc-200">
-                        {aiData?.quick_summary?.one_line ? (
-                          <p>{aiData.quick_summary.one_line}</p>
+                        {aiForSelection?.quick_summary?.one_line ? (
+                          <p>{aiForSelection.quick_summary.one_line}</p>
                         ) : (
-                          <p className="text-zinc-500">選定標的後會自動載入技術摘要。</p>
+                          <p className="text-zinc-500">
+                            {aiLoading ? "技術摘要載入中…" : "選定標的後會自動載入技術摘要。"}
+                          </p>
                         )}
-                        {aiData?.quick_summary?.bullish?.length ? (
+                        {aiForSelection?.quick_summary?.bullish?.length ? (
                           <div className="mt-2">
                             <span className="text-xs text-green-400">偏多：</span>
-                            {aiData.quick_summary.bullish.join("；")}
+                            {aiForSelection.quick_summary.bullish.join("；")}
                           </div>
                         ) : null}
-                        {aiData?.quick_summary?.bearish?.length ? (
+                        {aiForSelection?.quick_summary?.bearish?.length ? (
                           <div className="mt-1">
                             <span className="text-xs text-red-400">偏空：</span>
-                            {aiData.quick_summary.bearish.join("；")}
+                            {aiForSelection.quick_summary.bearish.join("；")}
                           </div>
                         ) : null}
                       </div>
@@ -1762,15 +1947,15 @@ export default function Home() {
               <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-5">
                 <h3 className="text-lg font-bold mb-4">資料狀態</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">實際使用代號</span><span>{detailData?.symbol || selected.symbol}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">原始輸入代號</span><span>{detailData?.raw_symbol || selected.symbol}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">實際使用代號</span><span>{detailForSelection?.symbol || selected.symbol}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">原始輸入代號</span><span>{detailForSelection?.raw_symbol || selected.symbol}</span></div>
                   <div className="flex gap-4"><span className="text-zinc-500 w-32">資料來源</span><span>{selected.market === "CRYPTO" ? "Bybit API" : "Yahoo Finance"}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">顯示週期</span><span>{detailData?.interval || "1d"}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">抓取 interval</span><span>{detailData?.fetch_interval || "1d"}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">抓取 period</span><span>{detailData?.period || "-"}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">資料品質</span><span>{detailData?.data_quality || "-"}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">Sector</span><span>{detailData?.sector || "-"}</span></div>
-                  <div className="flex gap-4"><span className="text-zinc-500 w-32">Industry</span><span>{detailData?.industry || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">顯示週期</span><span>{detailForSelection?.interval || "1d"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">抓取 interval</span><span>{detailForSelection?.fetch_interval || "1d"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">抓取 period</span><span>{detailForSelection?.period || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">資料品質</span><span>{detailForSelection?.data_quality || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">Sector</span><span>{detailForSelection?.sector || "-"}</span></div>
+                  <div className="flex gap-4"><span className="text-zinc-500 w-32">Industry</span><span>{detailForSelection?.industry || "-"}</span></div>
                 </div>
               </div>
             )}
@@ -1805,7 +1990,7 @@ export default function Home() {
             <div className="space-y-4">
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">Symbol</div>
-                <div className="font-semibold">{detailData?.code ?? detailData?.symbol ?? selected.symbol}</div>
+                <div className="font-semibold">{detailForSelection?.code ?? detailForSelection?.symbol ?? selected.symbol}</div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
@@ -1816,36 +2001,36 @@ export default function Home() {
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術趨勢</div>
                 <div className="font-semibold">
-                  {loading ? "…" : aiData?.quick_summary?.trend || "—"}
+                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.trend || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">估值 / 強弱</div>
                 <div className="font-semibold">
-                  {loading ? "…" : aiData?.quick_summary?.valuation || "—"}
+                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.valuation || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-1">技術風險</div>
                 <div className="font-semibold">
-                  {loading ? "…" : aiData?.quick_summary?.risk || "—"}
+                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.risk || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4 text-center">
                 <div className="text-zinc-400 text-sm mb-2">一句話技術摘要</div>
                 <div className="text-sm leading-6">
-                  {loading ? "…" : aiData?.quick_summary?.one_line || "—"}
+                  {aiLoading && aiKey !== selectedStockKey ? "…" : aiForSelection?.quick_summary?.one_line || "—"}
                 </div>
               </div>
 
               <div className="bg-zinc-800 rounded-xl p-4">
                 <div className="text-zinc-400 text-sm mb-2">偏多訊號</div>
                 <div className="space-y-2">
-                  {aiData?.quick_summary?.bullish?.length ? (
-                    aiData.quick_summary.bullish.map((item, idx) => (
+                  {aiForSelection?.quick_summary?.bullish?.length ? (
+                    aiForSelection.quick_summary.bullish.map((item, idx) => (
                       <div key={idx} className="text-sm leading-5 text-green-300">
                         • {item}
                       </div>
@@ -1859,8 +2044,8 @@ export default function Home() {
               <div className="bg-zinc-800 rounded-xl p-4">
                 <div className="text-zinc-400 text-sm mb-2">偏空 / 風險訊號</div>
                 <div className="space-y-2">
-                  {aiData?.quick_summary?.bearish?.length ? (
-                    aiData.quick_summary.bearish.map((item, idx) => (
+                  {aiForSelection?.quick_summary?.bearish?.length ? (
+                    aiForSelection.quick_summary.bearish.map((item, idx) => (
                       <div key={idx} className="text-sm leading-5 text-red-300">
                         • {item}
                       </div>
@@ -1874,8 +2059,8 @@ export default function Home() {
               <div className="bg-zinc-800 rounded-xl p-4">
                 <div className="text-zinc-400 text-sm mb-2">技術型態</div>
                 <div className="space-y-2">
-                  {aiData?.quick_summary?.patterns?.length ? (
-                    aiData.quick_summary.patterns.map((item, idx) => (
+                  {aiForSelection?.quick_summary?.patterns?.length ? (
+                    aiForSelection.quick_summary.patterns.map((item, idx) => (
                       <div key={idx} className="text-sm leading-5">
                         • {item}
                       </div>
@@ -1888,7 +2073,7 @@ export default function Home() {
 
               <div className="bg-zinc-800 rounded-xl p-4">
                 <div className="text-zinc-400 text-sm mb-2">多時間框架總覽（1h / 4h / 1d / 1wk）</div>
-                {multiTimeframe.length > 0 ? (
+                {mtfKey === selectedStockKey && multiTimeframe.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -1915,7 +2100,9 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="text-sm py-2">
-                    <div className="text-zinc-500">載入中或後端未提供資料。</div>
+                    <div className="text-zinc-500">
+                      {mtfLoading && mtfKey !== selectedStockKey ? "載入中…" : "載入中或後端未提供資料。"}
+                    </div>
                     {mtfError && <div className="text-amber-400 mt-1 text-xs">錯誤：{mtfError}</div>}
                     <div className="text-zinc-600 text-xs mt-1">請確認後端已啟動且從 stock-platform/backend 執行 uvicorn。</div>
                   </div>
@@ -1924,7 +2111,7 @@ export default function Home() {
 
               <div className="bg-zinc-800 rounded-xl p-4">
                 <div className="text-zinc-400 text-sm mb-2">技術訊號總表</div>
-                {signalTable.length > 0 ? (
+                {sigKey === selectedStockKey && signalTable.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -1947,7 +2134,9 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="text-sm py-2">
-                    <div className="text-zinc-500">載入中或後端未提供資料。</div>
+                    <div className="text-zinc-500">
+                      {sigLoading && sigKey !== selectedStockKey ? "載入中…" : "載入中或後端未提供資料。"}
+                    </div>
                     {sigError && <div className="text-amber-400 mt-1 text-xs">錯誤：{sigError}</div>}
                   </div>
                 )}
