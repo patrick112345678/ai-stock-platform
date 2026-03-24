@@ -1,13 +1,14 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { memo, useEffect, useRef } from "react"
+import type { IChartApi, ISeriesApi } from "lightweight-charts"
 import {
   createChart,
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
   ColorType,
-  UTCTimestamp
+  UTCTimestamp,
 } from "lightweight-charts"
 
 type Candle = {
@@ -24,7 +25,7 @@ type Props = {
 }
 
 function calculateMA(data: Candle[], period: number) {
-  const result: any[] = []
+  const result: { time: UTCTimestamp; value: number }[] = []
 
   for (let i = 0; i < data.length; i++) {
     if (i < period) continue
@@ -37,76 +38,108 @@ function calculateMA(data: Candle[], period: number) {
 
     result.push({
       time: Math.floor(new Date(data[i].time).getTime() / 1000) as UTCTimestamp,
-      value: sum / period
+      value: sum / period,
     })
   }
 
   return result
 }
 
-export default function TradingChart({ data }: Props) {
-  const ref = useRef<HTMLDivElement>(null)
+type SeriesBundle = {
+  candle: ISeriesApi<"Candlestick">
+  volume: ISeriesApi<"Histogram">
+  ma20: ISeriesApi<"Line">
+  ma50: ISeriesApi<"Line">
+}
+
+function TradingChartInner({ data }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<IChartApi | null>(null)
+  const seriesRef = useRef<SeriesBundle | null>(null)
 
   useEffect(() => {
-    if (!ref.current || !data?.length) return
+    const el = containerRef.current
+    if (!el) return
 
-    const chart = createChart(ref.current, {
-      height: 520,
-      layout: {
-        background: { type: ColorType.Solid, color: "#18181b" },
-        textColor: "#d4d4d8"
-      },
-      grid: {
-        vertLines: { color: "#27272a" },
-        horzLines: { color: "#27272a" }
+    if (!data?.length) {
+      chartRef.current?.remove()
+      chartRef.current = null
+      seriesRef.current = null
+      return
+    }
+
+    if (!chartRef.current) {
+      const chart = createChart(el, {
+        height: 520,
+        layout: {
+          background: { type: ColorType.Solid, color: "#18181b" },
+          textColor: "#d4d4d8",
+        },
+        grid: {
+          vertLines: { color: "#27272a" },
+          horzLines: { color: "#27272a" },
+        },
+      })
+
+      chartRef.current = chart
+      seriesRef.current = {
+        candle: chart.addSeries(CandlestickSeries),
+        volume: chart.addSeries(HistogramSeries, {
+          priceFormat: { type: "volume" },
+          priceScaleId: "",
+        }),
+        ma20: chart.addSeries(LineSeries, {
+          color: "#facc15",
+          lineWidth: 2,
+        }),
+        ma50: chart.addSeries(LineSeries, {
+          color: "#60a5fa",
+          lineWidth: 2,
+        }),
       }
-    })
+    }
 
-    const candleSeries = chart.addSeries(CandlestickSeries)
+    const s = seriesRef.current
+    if (!s) return
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: ""
-    })
-
-    const ma20Series = chart.addSeries(LineSeries, {
-      color: "#facc15",
-      lineWidth: 2
-    })
-
-    const ma50Series = chart.addSeries(LineSeries, {
-      color: "#60a5fa",
-      lineWidth: 2
-    })
-
-    const formatted = data.map(d => ({
+    const formatted = data.map((d) => ({
       time: Math.floor(new Date(d.time).getTime() / 1000) as UTCTimestamp,
       open: d.open,
       high: d.high,
       low: d.low,
-      close: d.close
+      close: d.close,
     }))
 
-    candleSeries.setData(formatted)
+    s.candle.setData(formatted)
 
-    const volume = data.map(d => ({
+    const volume = data.map((d) => ({
       time: Math.floor(new Date(d.time).getTime() / 1000) as UTCTimestamp,
       value: d.volume || 0,
-      color: d.close > d.open ? "#22c55e" : "#ef4444"
+      color: d.close > d.open ? "#22c55e" : "#ef4444",
     }))
 
-    volumeSeries.setData(volume)
+    s.volume.setData(volume)
 
     const ma20 = calculateMA(data, 20)
     const ma50 = calculateMA(data, 50)
 
-    ma20Series.setData(ma20)
-    ma50Series.setData(ma50)
+    s.ma20.setData(ma20)
+    s.ma50.setData(ma50)
 
-    chart.timeScale().fitContent()
-
-    return () => chart.remove()
+    requestAnimationFrame(() => {
+      chartRef.current?.timeScale().fitContent()
+    })
   }, [data])
 
-  return <div ref={ref} className="w-full h-[520px]" />
+  useEffect(() => {
+    return () => {
+      chartRef.current?.remove()
+      chartRef.current = null
+      seriesRef.current = null
+    }
+  }, [])
+
+  return <div ref={containerRef} className="w-full h-[520px]" />
 }
+
+export default memo(TradingChartInner)

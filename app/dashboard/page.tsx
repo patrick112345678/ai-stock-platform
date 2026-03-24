@@ -1,5 +1,6 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -11,7 +12,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-react"
-import TradingChart from "@/components/TradingChart"
 import { AiReportPanel } from "@/components/AiReportPanel"
 import { AccountSidebarCard, AccountTopBar } from "@/components/DashboardAccount"
 import { formatStockLabel, StockLabel } from "@/components/StockLabel"
@@ -24,6 +24,12 @@ import {
   SkeletonPeerTableRows,
   SkeletonTechCard,
 } from "@/components/Skeleton"
+
+/** K 線與 lightweight-charts 動態載入，避免拖慢首屏與主執行緒 */
+const TradingChart = dynamic(() => import("@/components/TradingChart"), {
+  ssr: false,
+  loading: () => <SkeletonChartBlock />,
+})
 import {
   addWatchlist,
   analyzeAI,
