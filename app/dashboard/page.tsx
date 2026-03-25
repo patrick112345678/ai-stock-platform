@@ -39,14 +39,11 @@ import {
   handleAuthError,
   getAIOpportunities,
   getChart,
-  getDetail,
-  getMultiTimeframe,
   getPeers,
-  getQuote,
+  getSelectionBundle,
   getScannerLeaderboard,
   getScannerOpportunities,
   getScannerWatchlist,
-  getSignalTable,
   getWatchlist,
   getWatchlistOverview,
   reorderWatchlist,
@@ -626,81 +623,71 @@ export default function Home() {
     const intervalOnly =
       !stockChanged && lastFetchedChartIntervalRef.current !== iv
 
-    const runLayer1QuoteDetail = () => {
+    /** 單一 HTTP：後端執行緒並行 quote/detail/chart/mtf/signal，避免多支 GET 在 Render 上排隊 */
+    const runLayerBundleQuoteThroughSignal = () => {
       setError("")
       setQuoteLoading(true)
       setDetailLoading(true)
-
-      void Promise.allSettled([
-        stockFetchDedupe(`quote:${key}`, () => getQuote(sym, mkt)),
-        stockFetchDedupe(`detail:${key}`, () => getDetail(sym, mkt)),
-      ])
-        .then((results) => {
-          if (stockFetchSeqRef.current !== mySeq) return
-          const [qr, dr] = results
-          if (qr.status === "fulfilled") {
-            setQuote(qr.value as QuoteData)
-            setQuoteKey(key)
-          } else {
-            console.warn("getQuote:", qr.reason)
-            setQuoteKey(null)
-          }
-          if (dr.status === "fulfilled") {
-            setDetailData(dr.value as DetailData)
-            setDetailKey(key)
-          } else {
-            console.warn("getDetail:", dr.reason)
-            setDetailKey(null)
-          }
-        })
-        .finally(() => {
-          if (stockFetchSeqRef.current !== mySeq) return
-          setQuoteLoading(false)
-          setDetailLoading(false)
-        })
-    }
-
-    const runLayer2ChartMtfSig = () => {
       setChartLoading(true)
       setMtfLoading(true)
       setSigLoading(true)
       setMtfError(null)
       setSigError(null)
 
-      void Promise.allSettled([
-        stockFetchDedupe(`chart:${key}:${iv}`, () => getChart(sym, mkt, iv)),
-        stockFetchDedupe(`mtf:${key}`, () => getMultiTimeframe(sym, mkt)),
-        stockFetchDedupe(`sig:${key}`, () => getSignalTable(sym, mkt)),
-      ])
-        .then((results) => {
+      void stockFetchDedupe(`bundle:${key}:${iv}`, () => getSelectionBundle(sym, mkt, iv))
+        .then((bundle) => {
           if (stockFetchSeqRef.current !== mySeq) return
 
-          const [chartResult, mtfResult, sigResult] = results
+          if (bundle.quote && typeof bundle.quote === "object") {
+            setQuote(bundle.quote as QuoteData)
+            setQuoteKey(key)
+          } else {
+            setQuoteKey(null)
+          }
 
-          if (chartResult.status === "fulfilled") {
-            const chartJson = chartResult.value as { candles?: ChartCandle[] }
-            setChartData(Array.isArray(chartJson.candles) ? chartJson.candles : [])
+          if (bundle.detail && typeof bundle.detail === "object") {
+            setDetailData(bundle.detail as DetailData)
+            setDetailKey(key)
+          } else {
+            setDetailKey(null)
+          }
+
+          const candles = bundle.chart?.candles
+          if (Array.isArray(candles)) {
+            setChartData(candles as ChartCandle[])
             setChartKey(key)
           } else {
-            console.error("getChart error:", chartResult.status === "rejected" ? chartResult.reason : "")
             setChartData([])
             setChartKey(null)
           }
 
-          setMultiTimeframe(
-            mtfResult.status === "fulfilled" && Array.isArray(mtfResult.value) ? mtfResult.value : []
-          )
-          setMtfKey(mtfResult.status === "fulfilled" ? key : null)
-          setMtfError(mtfResult.status === "rejected" ? (mtfResult.reason?.message ?? "未知錯誤") : null)
+          if (Array.isArray(bundle.multi_timeframe)) {
+            setMultiTimeframe(bundle.multi_timeframe)
+            setMtfKey(key)
+            setMtfError(bundle.errors?.multi_timeframe ?? null)
+          } else {
+            setMultiTimeframe([])
+            setMtfKey(null)
+            setMtfError(bundle.errors?.multi_timeframe ?? "未知錯誤")
+          }
 
-          setSignalTable(
-            sigResult.status === "fulfilled" && Array.isArray(sigResult.value) ? sigResult.value : []
-          )
-          setSigKey(sigResult.status === "fulfilled" ? key : null)
-          setSigError(sigResult.status === "rejected" ? (sigResult.reason?.message ?? "未知錯誤") : null)
+          if (Array.isArray(bundle.signal_table)) {
+            setSignalTable(bundle.signal_table)
+            setSigKey(key)
+            setSigError(bundle.errors?.signal_table ?? null)
+          } else {
+            setSignalTable([])
+            setSigKey(null)
+            setSigError(bundle.errors?.signal_table ?? "未知錯誤")
+          }
+        })
+        .catch((e) => {
+          console.warn("selection-bundle:", e)
         })
         .finally(() => {
           if (stockFetchSeqRef.current !== mySeq) return
+          setQuoteLoading(false)
+          setDetailLoading(false)
           setChartLoading(false)
           setMtfLoading(false)
           setSigLoading(false)
@@ -751,8 +738,7 @@ export default function Home() {
     lastFetchedStockKeyRef.current = key
     lastFetchedChartIntervalRef.current = iv
 
-    runLayer1QuoteDetail()
-    runLayer2ChartMtfSig()
+    runLayerBundleQuoteThroughSignal()
     // 第三層延後到下一個 macrotask，讓 quote/detail 與背景 layer2 先進入佇列，避免與首屏競爭
     window.setTimeout(() => runLayer3Ai(), 0)
   }, [selected.symbol, selected.market, chartInterval, checkedAuth])

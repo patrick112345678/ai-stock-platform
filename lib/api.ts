@@ -361,13 +361,53 @@ export async function getSignalTable(
   return res.json()
 }
 
+/** 與 getChart 相同 period 規則，供 selection-bundle 共用 */
+export function chartPeriodForInterval(interval: string): string {
+  if (interval === "1h") return "1mo"
+  if (interval === "4h") return "2mo"
+  if (interval === "1wk") return "2y"
+  return "3mo"
+}
+
+export type SelectionBundleResponse = {
+  quote: Record<string, unknown> | null
+  detail: DetailData | null
+  chart: { candles?: unknown[]; symbol?: string; interval?: string; period?: string } | null
+  multi_timeframe: unknown[] | null
+  signal_table: unknown[] | null
+  errors?: Record<string, string> | null
+}
+
+/** 切換標的時一次拉 quote/detail/chart/mtf/signal，減少多支 HTTP 在單 worker 上排隊 */
+export async function getSelectionBundle(
+  symbol: string,
+  market: MarketPool,
+  interval: string = "1d",
+  period?: string,
+  lang = "zh"
+): Promise<SelectionBundleResponse> {
+  const p = period ?? chartPeriodForInterval(interval)
+  const params = new URLSearchParams()
+  params.set("symbol", symbol)
+  params.set("market", market)
+  params.set("interval", interval)
+  params.set("period", p)
+  params.set("lang", lang)
+  const res = await fetch(`${API_BASE}/market/selection-bundle?${params.toString()}`)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`selection-bundle 錯誤: ${text}`)
+  }
+  return res.json()
+}
+
 export async function getChart(
   symbol: string,
   market: MarketPool,
   interval: string = "1d",
   period?: string
 ) {
-  const p = period ?? (interval === "1h" ? "1mo" : interval === "4h" ? "2mo" : interval === "1wk" ? "2y" : "3mo")
+  const p = period ?? chartPeriodForInterval(interval)
   const res = await fetch(
     `${API_BASE}/market/chart?symbol=${symbol}&market=${market}&interval=${interval}&period=${p}`
   )
