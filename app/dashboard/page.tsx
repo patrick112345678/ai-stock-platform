@@ -206,6 +206,8 @@ export default function Home() {
   const lastFetchedStockKeyRef = useRef<string | null>(null)
   const lastFetchedChartIntervalRef = useRef<typeof chartInterval>(chartInterval)
   const aiLayerSeqRef = useRef(0)
+  /** 用於偵測「AI 面板由縮起 → 展開」，切換股票時不重打 /ai/analyze */
+  const prevAiPanelCollapsedRef = useRef(true)
 
   const [techScoreMin, setTechScoreMin] = useState(60)
   const [screenerFilterResult, setScreenerFilterResult] = useState<any[]>([])
@@ -610,6 +612,28 @@ export default function Home() {
   const isHeaderPricePending = isQuotePending || (isDetailPending && !quoteForSelection)
   const isAiBlockPending = aiLoading && aiKey !== selectedStockKey
 
+  const fetchQuickAiSummary = useCallback(() => {
+    if (!checkedAuth || !selected.symbol) return
+    const mySeq = ++aiLayerSeqRef.current
+    const sym = selected.symbol
+    const mkt = selected.market
+    const key = `${sym}-${mkt}`
+    setAiLoading(true)
+    void stockFetchDedupe(`ai:${key}`, () => analyzeAI(sym, mkt))
+      .then((res) => {
+        if (aiLayerSeqRef.current !== mySeq) return
+        setAiData(res as AIAnalyzeResponse)
+        setAiKey(key)
+      })
+      .catch((e) => {
+        console.error("analyzeAI error:", e)
+      })
+      .finally(() => {
+        if (aiLayerSeqRef.current !== mySeq) return
+        setAiLoading(false)
+      })
+  }, [checkedAuth, selected.symbol, selected.market])
+
   useEffect(() => {
     if (!checkedAuth) return
     if (!selected.symbol) return
@@ -725,50 +749,53 @@ export default function Home() {
     runLayerBundleQuoteThroughSignal()
   }, [selected.symbol, selected.market, chartInterval, checkedAuth])
 
-  /** 僅在 AI 面板展開時載入 quick_summary（含型態），避免切換股票時自動打 /ai/analyze */
+  /**
+   * 僅在「右側 AI 區塊由縮起 → 展開」時自動載入 quick_summary。
+   * 切換股票時不觸發；若已展開且換股，請用面板內「載入 AI 技術摘要」按鈕。
+   */
   useEffect(() => {
     if (!checkedAuth) return
+    if (aiPanelCollapsed) {
+      prevAiPanelCollapsedRef.current = true
+      return
+    }
     if (!selected.symbol) return
-    if (aiPanelCollapsed) return
+    const wasCollapsed = prevAiPanelCollapsedRef.current
+    prevAiPanelCollapsedRef.current = false
+    if (!wasCollapsed) return
+    fetchQuickAiSummary()
+  }, [checkedAuth, aiPanelCollapsed, fetchQuickAiSummary])
 
-    const mySeq = ++aiLayerSeqRef.current
+  /** 同業比較延遲載入，避免與 selection-bundle 同一瞬間打 /market/peers */
+  useEffect(() => {
+    if (activeTab !== "fundamental" || (selected.market !== "TW" && selected.market !== "US")) {
+      return
+    }
+    setPeers([])
+    setLoadingPeers(true)
     const sym = selected.symbol
     const mkt = selected.market
-    const key = `${sym}-${mkt}`
-
-    setAiLoading(true)
-    void stockFetchDedupe(`ai:${key}`, () => analyzeAI(sym, mkt))
-      .then((res) => {
-        if (aiLayerSeqRef.current !== mySeq) return
-        setAiData(res as AIAnalyzeResponse)
-        setAiKey(key)
-      })
-      .catch((e) => {
-        console.error("analyzeAI error:", e)
-      })
-      .finally(() => {
-        if (aiLayerSeqRef.current !== mySeq) return
-        setAiLoading(false)
-      })
-  }, [checkedAuth, selected.symbol, selected.market, aiPanelCollapsed])
-
-  useEffect(() => {
-    if (activeTab !== "fundamental" || (selected.market !== "TW" && selected.market !== "US")) return
-    const mySeq = ++peerFetchSeqRef.current
-    setLoadingPeers(true)
-    getPeers(selected.symbol, selected.market, 6)
-      .then((r) => {
-        if (peerFetchSeqRef.current !== mySeq) return
-        setPeers(r.peers || [])
-      })
-      .catch(() => {
-        if (peerFetchSeqRef.current !== mySeq) return
-        setPeers([])
-      })
-      .finally(() => {
-        if (peerFetchSeqRef.current !== mySeq) return
-        setLoadingPeers(false)
-      })
+    const delayMs = 900
+    const timer = window.setTimeout(() => {
+      const mySeq = ++peerFetchSeqRef.current
+      getPeers(sym, mkt, 6)
+        .then((r) => {
+          if (peerFetchSeqRef.current !== mySeq) return
+          setPeers(r.peers || [])
+        })
+        .catch(() => {
+          if (peerFetchSeqRef.current !== mySeq) return
+          setPeers([])
+        })
+        .finally(() => {
+          if (peerFetchSeqRef.current !== mySeq) return
+          setLoadingPeers(false)
+        })
+    }, delayMs)
+    return () => {
+      clearTimeout(timer)
+      setLoadingPeers(false)
+    }
   }, [activeTab, selected.symbol, selected.market])
 
   useEffect(() => {
@@ -1501,6 +1528,19 @@ export default function Home() {
                     </Link>
                   </div>
                 )}
+                {!aiForSelection?.quick_summary && (
+                  <div className="px-5 py-3 border-b border-violet-900/60">
+                    <button
+                      type="button"
+                      onClick={() => fetchQuickAiSummary()}
+                      disabled={aiLoading}
+                      className="rounded-md border border-violet-600/80 bg-violet-900/40 px-3 py-2 text-sm text-violet-100 hover:bg-violet-800/50 disabled:opacity-50"
+                    >
+                      {aiLoading ? "載入中…" : "載入 AI 技術摘要（目前標的）"}
+                    </button>
+                    <p className="mt-2 text-xs text-zinc-500">切換自選不會自動呼叫 AI；展開本面板時會載入一次，換股後請再點此按鈕。</p>
+                  </div>
+                )}
                 <div className="px-5 py-4 flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => {
@@ -1995,6 +2035,16 @@ export default function Home() {
 
                     <div>
                       <h4 className="mb-2 text-sm font-semibold text-zinc-300">系統快速結論（規則摘要）</h4>
+                      {!aiForSelection?.quick_summary && (
+                        <button
+                          type="button"
+                          onClick={() => fetchQuickAiSummary()}
+                          disabled={aiLoading}
+                          className="mb-3 rounded-md border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+                        >
+                          {aiLoading ? "載入中…" : "載入 AI 技術摘要"}
+                        </button>
+                      )}
                       <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-4 text-sm leading-6 text-zinc-200">
                         {aiForSelection?.quick_summary?.one_line ? (
                           <p>{aiForSelection.quick_summary.one_line}</p>
@@ -2005,7 +2055,7 @@ export default function Home() {
                             <SkeletonBar className="h-4 w-4/5" />
                           </div>
                         ) : (
-                          <p className="text-zinc-500">展開「AI 分析」面板後會載入技術摘要。</p>
+                          <p className="text-zinc-500">請展開右側「AI 分析」面板或點上方按鈕載入技術摘要（切換股票不會自動請求）。</p>
                         )}
                         {aiForSelection?.quick_summary?.bullish?.length ? (
                           <div className="mt-2">
