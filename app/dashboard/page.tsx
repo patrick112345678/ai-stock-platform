@@ -167,7 +167,8 @@ export default function Home() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [marketPool, setMarketPool] = useState<"TW" | "US" | "CRYPTO">("TW")
   const [scanPool, setScanPool] = useState<"TOP30" | "TOP100" | "TOP800" | "ALL">("TOP30")
-  const [symbolInput, setSymbolInput] = useState("2330")
+  /** 僅供搜尋框使用，與 selected 解耦，避免切換自選時觸發 /market/search */
+  const [searchKeyword, setSearchKeyword] = useState("")
   const [showChart, setShowChart] = useState(false)
   const [chartInterval, setChartInterval] = useState<"1h" | "4h" | "1d" | "1wk">("1d")
 
@@ -204,6 +205,7 @@ export default function Home() {
   const peerFetchSeqRef = useRef(0)
   const lastFetchedStockKeyRef = useRef<string | null>(null)
   const lastFetchedChartIntervalRef = useRef<typeof chartInterval>(chartInterval)
+  const aiLayerSeqRef = useRef(0)
 
   const [techScoreMin, setTechScoreMin] = useState(60)
   const [screenerFilterResult, setScreenerFilterResult] = useState<any[]>([])
@@ -369,7 +371,6 @@ export default function Home() {
         const pick = firstTw ?? finalMapped[0]
         setSelected(pick)
         setMarketPool(pick.market)
-        setSymbolInput(pick.symbol)
       }
     } catch (err) {
       console.error(err)
@@ -694,23 +695,6 @@ export default function Home() {
         })
     }
 
-    const runLayer3Ai = () => {
-      setAiLoading(true)
-      stockFetchDedupe(`ai:${key}`, () => analyzeAI(sym, mkt))
-        .then((res) => {
-          if (stockFetchSeqRef.current !== mySeq) return
-          setAiData(res as AIAnalyzeResponse)
-          setAiKey(key)
-        })
-        .catch((e) => {
-          console.error("analyzeAI error:", e)
-        })
-        .finally(() => {
-          if (stockFetchSeqRef.current !== mySeq) return
-          setAiLoading(false)
-        })
-    }
-
     if (intervalOnly) {
       lastFetchedChartIntervalRef.current = iv
       setChartLoading(true)
@@ -739,9 +723,34 @@ export default function Home() {
     lastFetchedChartIntervalRef.current = iv
 
     runLayerBundleQuoteThroughSignal()
-    // 第三層延後到下一個 macrotask，讓 quote/detail 與背景 layer2 先進入佇列，避免與首屏競爭
-    window.setTimeout(() => runLayer3Ai(), 0)
   }, [selected.symbol, selected.market, chartInterval, checkedAuth])
+
+  /** 僅在 AI 面板展開時載入 quick_summary（含型態），避免切換股票時自動打 /ai/analyze */
+  useEffect(() => {
+    if (!checkedAuth) return
+    if (!selected.symbol) return
+    if (aiPanelCollapsed) return
+
+    const mySeq = ++aiLayerSeqRef.current
+    const sym = selected.symbol
+    const mkt = selected.market
+    const key = `${sym}-${mkt}`
+
+    setAiLoading(true)
+    void stockFetchDedupe(`ai:${key}`, () => analyzeAI(sym, mkt))
+      .then((res) => {
+        if (aiLayerSeqRef.current !== mySeq) return
+        setAiData(res as AIAnalyzeResponse)
+        setAiKey(key)
+      })
+      .catch((e) => {
+        console.error("analyzeAI error:", e)
+      })
+      .finally(() => {
+        if (aiLayerSeqRef.current !== mySeq) return
+        setAiLoading(false)
+      })
+  }, [checkedAuth, selected.symbol, selected.market, aiPanelCollapsed])
 
   useEffect(() => {
     if (activeTab !== "fundamental" || (selected.market !== "TW" && selected.market !== "US")) return
@@ -765,7 +774,7 @@ export default function Home() {
   useEffect(() => {
     if (!checkedAuth) return
 
-    const keyword = symbolInput.trim()
+    const keyword = searchKeyword.trim()
 
     if (!keyword) {
       setSearchResults([])
@@ -786,10 +795,10 @@ export default function Home() {
       } finally {
         setSearchLoading(false)
       }
-    }, 250)
+    }, 350)
 
     return () => clearTimeout(timer)
-  }, [symbolInput, marketPool, checkedAuth])
+  }, [searchKeyword, marketPool, checkedAuth])
 
   const filteredWatchlist = useMemo(() => {
     return watchlist.filter((w) => w.market === marketPool)
@@ -837,8 +846,8 @@ export default function Home() {
   }, [scannerMode, watchlistScannerResult, filteredScannerResult, watchlistSymbolSet, marketPool, techScoreMin])
 
   function handleSelectSearchItem(item: SearchItem) {
-    setSymbolInput(item.symbol)
     setShowSearchDropdown(false)
+    setSearchKeyword("")
     setSelected({
       symbol: item.symbol,
       market: item.market,
@@ -853,7 +862,7 @@ export default function Home() {
         router.push("/login?msg=請先登入後再新增自選股")
         return
       }
-      const symbol = symbolInput.trim().toUpperCase()
+      const symbol = searchKeyword.trim().toUpperCase()
       if (!symbol) return
 
       const normalized = normalizeWatchlistSymbol(symbol, marketPool)
@@ -1000,8 +1009,8 @@ export default function Home() {
 
               <div className="relative" ref={searchRef}>
                 <input
-                  value={symbolInput}
-                  onChange={(e) => setSymbolInput(e.target.value)}
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
                   onFocus={() => {
                     if (searchResults.length > 0) setShowSearchDropdown(true)
                   }}
@@ -1057,7 +1066,6 @@ export default function Home() {
                 watchlistOverview={watchlistOverview}
                 onSelectItem={(item) => {
                   setSelected(item)
-                  setSymbolInput(item.symbol)
                   setMarketPool(item.market)
                   setShowSearchDropdown(false)
                 }}
@@ -1997,7 +2005,7 @@ export default function Home() {
                             <SkeletonBar className="h-4 w-4/5" />
                           </div>
                         ) : (
-                          <p className="text-zinc-500">選定標的後會自動載入技術摘要。</p>
+                          <p className="text-zinc-500">展開「AI 分析」面板後會載入技術摘要。</p>
                         )}
                         {aiForSelection?.quick_summary?.bullish?.length ? (
                           <div className="mt-2">
